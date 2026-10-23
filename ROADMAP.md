@@ -18,6 +18,7 @@ What's been reported, what's done, and what's next. Reports come from
 | v0.1.1 | Ko-fi / GitHub Sponsors button, README Support section | ✅ |
 | v0.1.1 | **Display → Screen effect**: Scanlines, LCD grid | 🧪 |
 | v0.1.1 | **HOME Menu icons per game**: `make-forwarders.sh` builds one forwarder CIA per game | 🧪 |
+| v0.1.1 | **Auto frame skip** goes down to 1 of 6 frames on very heavy 3D screens (Mario Kart menus), so the game and sound never slow down | ✅ |
 
 ## Open
 
@@ -35,7 +36,7 @@ What's been reported, what's done, and what's next. Reports come from
 | 10 | CRT / retro screen filters | ClockIllustrious2077 | 🧪 in v0.1.1 (Scanlines, LCD grid) |
 | 11 | RetroAchievements | MysticFlipFlop (#1) | 📋 v0.1.2 (casual mode first) |
 | 12 | Link cable between two 3DS consoles | Han_Solo6712 | 💤 |
-| 13 | Faster 3D drawing on Old 3DS (3D pictures refresh ~30/s now) | — | 💤 |
+| 13 | Faster 3D drawing on Old 3DS (3D pictures refresh ~15-30/s; Mario Kart races ~15/s) | bheppe | 📋 |
 | 14 | Per-layer 3D for other emulators (PS1 / PCSX) | _SleepyLark_, LargoLaGrande1, goldaxis | 💤 |
 
 ## Works well (community reports, Old 3DS)
