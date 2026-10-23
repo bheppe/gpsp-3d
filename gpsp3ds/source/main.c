@@ -2576,6 +2576,7 @@ static float work_ms_avg = 16.0f;   /* main loop time per frame (smoothed) */
 static float emu_ms_avg = 12.0f;    /* the same without waiting for core 2 */
 static int   heavy_frames;
 static bool skip_heavy;      /* core 2 too slow for every frame */
+static int  skip_fits;       /* drawn pictures in a row that needed fewer skips */
 static int  skip_phase;      /* heavy mode: 0 = draw (deferred), >0 = skips left */
 static int  skip_count;
 static u32  frames_drawn;
@@ -2604,6 +2605,7 @@ static bool frame_skip_plan(void)
    if (!skip_heavy)
    {
       skip_phase = 0;
+      skip_count = 0;
       return true;
    }
    if (skip_phase == 0)
@@ -2612,9 +2614,22 @@ static bool frame_skip_plan(void)
        * it (heavy 3D screens can take 50-90 ms on an Old 3DS): the game
        * never waits for core 2, so it and the sound stay at full speed */
       u32 c2 = video_thread_last_render_us() + video_thread_last_hook_us();
-      skip_count = (int)((c2 + 14999) / 15000) - 1;
-      if (skip_count < 1) skip_count = 1;
-      if (skip_count > 5) skip_count = 5;
+      int need = (int)((c2 + 14999) / 15000) - 1;
+      if (need < 1) need = 1;
+      if (need > 5) need = 5;
+      /* Keep the rhythm steady: skip more at once when a picture needs it,
+       * but skip fewer only after a second of pictures that all fit, so it
+       * doesn't alternate 1-of-2 / 1-of-3 (which shows as small hitches). */
+      if (need >= skip_count)
+      {
+         skip_count = need;
+         skip_fits = 0;
+      }
+      else if (++skip_fits >= 30)
+      {
+         skip_count--;
+         skip_fits = 0;
+      }
       video_thread_defer_next_finish();
       skip_phase = skip_count;
       return true;
