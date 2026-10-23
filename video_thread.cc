@@ -102,6 +102,7 @@ static const u16 *vt_cc_lut;
 static volatile int vt_force_pal;
 static int vt_depth[4];
 static int vt_obj_depth[4];    /* sprites can sit nearer than BGs of the same priority */
+static volatile int vt_tilt16;  /* floor tilt: extra depth at the bottom line, 1/16 px */
 static volatile int vt_fill_gaps = 1;
 static volatile int vt_smart = 1;      /* layers that scroll together share a depth */
 static volatile int vt_fast3d = 0;     /* build both eyes from one drawn picture */
@@ -389,6 +390,19 @@ static void draw_line(vt_frame *f, unsigned vcount)
             eff[k] = bgd[n];
       for (k = 0; k < 4; k++)
         objd[k] = eff[k] + (vt_obj_depth[k] - vt_depth[k]);
+    }
+
+    if (vt_tilt16)
+    {
+      /* Floor tilt: the bottom of the screen comes nearer and the top goes
+       * further, so a road or floor drawn on one layer recedes. */
+      int t = vt_tilt16 * ((int)vcount - 80) / 80;
+      t = t < 0 ? -((8 - t) >> 4) : (t + 8) >> 4;
+      for (n = 0; n < 4; n++)
+      {
+        bgd[n] += t;
+        objd[n] += t;
+      }
     }
 
     if (vt_fast3d)
@@ -760,6 +774,7 @@ void video_thread_set_color_correction(const unsigned short *lut)
 void video_thread_set_gap_fill(int on) { vt_fill_gaps = on; }
 void video_thread_set_smart_layers(int on) { vt_smart = on; }
 void video_thread_set_fast3d(int on) { vt_fast3d = on; }
+void video_thread_set_tilt(int tilt16) { vt_tilt16 = tilt16; }
 
 void video_thread_set_stereo(const int depth[4])
 {

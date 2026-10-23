@@ -18,6 +18,8 @@ raise the 3D slider. No RetroArch needed.
 - **Smart layers.** Layers that scroll together and share tile graphics (one
   picture split over several layers, as in Pokemon maps) are kept at one depth,
   so hidden filler tiles never show through.
+- **Floor tilt.** Brings the bottom of the screen nearer and pushes the top
+  further away, so roads in racing games (and floors in general) recede.
 - **Per-game 3D profiles.** Settings can be saved for one game. Pokemon games
   start on Deep with Smart layers automatically.
 - **Full speed on an Old 3DS.** gpSP's ARM dynarec runs on the main core.
@@ -30,6 +32,9 @@ raise the 3D slider. No RetroArch needed.
 - **Touch menu** on the bottom screen with a live preview, save states with
   slots, auto frame skip, audio stretch when the game runs slow, and a stats
   panel.
+- **Gyro sensor** for WarioWare: Twisted, using the 3DS gyroscope.
+- **Forwarder support.** Started with a ROM path as its first argument, the
+  app plays that game directly and closes when you quit.
 - **Saves are shared with RetroArch.** Saves go to RetroArch's save folder if
   it exists, so you can switch between the two.
 
@@ -58,7 +63,7 @@ raise the 3D slider. No RetroArch needed.
 - **Menu:** tap the bottom screen while playing. Tabs:
   **Game** (save/load state, slot, reset, quit), **Display** (screen size,
   scaling, color), **3D** (effect, strength, layer style, per-layer depths,
-  sprite pop, focus, smart layers), **Speed** (frame skip, audio when slow,
+  sprite pop, focus, floor tilt, smart layers), **Speed** (frame skip, audio when slow,
   stats) and **System** (core 2 drawing, GPU display, core 2 priority).
 - **3D:** raise the 3DS 3D slider. **3D tab -> Strength** scales the effect.
   **3D tab -> Layer style** picks a preset. **3D tab -> Settings for** chooses
@@ -100,6 +105,16 @@ CIA. Results go to `gpsp3ds/out/` (`gpsp3d.cia`, `gpsp3d.3dsx`).
   palette dirty tracking (per 4 KB block) for the renderer's snapshots, and a
   fix for a stale ROM page queue when a second game is loaded.
 - `profiler.c`: optional timing profiler (`PROFILE=1`).
+
+## Support
+
+gpSP 3D is free and always will be: no paywalled features, ever.
+It's built with the help of AI coding tools, which cost real money per
+session. If it made your GBA games better, a tip helps keep fixes and
+new features coming: https://ko-fi.com/bheppe
+
+Bug reports and game test results help just as much. Post them under
+[Issues](../../issues).
 
 ## Credits and licenses
 

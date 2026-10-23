@@ -90,6 +90,7 @@ unsigned video_thread_last_hook_us(void);
 void     video_thread_set_frame_hook(void (*hook)(const unsigned short *left, const unsigned short *right, unsigned pitch, void *arg), void *arg);
 void     video_thread_set_stereo(const int depth[4]);
 void     video_thread_set_stereo2(const int bg_depth[4], const int obj_depth[4]);
+void     video_thread_set_tilt(int tilt16);
 int      video_thread_redraw(void);
 void     video_thread_set_gap_fill(int on);
 void     video_thread_set_smart_layers(int on);
@@ -160,6 +161,7 @@ typedef struct {
    int focus;       /* moves every layer nearer (+) or further (-) */
    int smart;       /* layers that scroll together share one depth */
    int fast;        /* 3D method: 0 Accurate (draw each eye), 1 Fast (draw once, move pixels) */
+   int tilt;        /* floor tilt: bottom of the screen nearer, top further (racing games) */
 } s3d;
 #define D3_STYLES 6
 #define D3_FLATMAP 4
@@ -234,6 +236,7 @@ static bool d3_parse(const char *k, const char *v, s3d *d)
    else if (!strcmp(k, "3d_focus"))    d->focus = clampi(x, -6, 6);
    else if (!strcmp(k, "3d_smart"))    d->smart = x ? 1 : 0;
    else if (!strcmp(k, "3d_method"))   d->fast = x ? 1 : 0;
+   else if (!strcmp(k, "3d_tilt"))     d->tilt = clampi(x, -8, 8);
    else
       return false;
    return true;
@@ -242,8 +245,8 @@ static bool d3_parse(const char *k, const char *v, s3d *d)
 static void d3_write(FILE *f, const s3d *d)
 {
    fprintf(f, "3d=%d\n3d_pct=%d\n3d_preset=%d\n3d_front=%d\n3d_middle=%d\n3d_back=%d\n3d_far=%d\n"
-           "3d_sprites=%d\n3d_focus=%d\n3d_smart=%d\n3d_method=%d\n", d->on, d->pct, d->style, d->layer[0], d->layer[1],
-           d->layer[2], d->layer[3], d->sprite, d->focus, d->smart, d->fast);
+           "3d_sprites=%d\n3d_focus=%d\n3d_smart=%d\n3d_method=%d\n3d_tilt=%d\n", d->on, d->pct, d->style, d->layer[0], d->layer[1],
+           d->layer[2], d->layer[3], d->sprite, d->focus, d->smart, d->fast, d->tilt);
 }
 
 static void config_load(void)
@@ -1014,6 +1017,12 @@ static void stereo_update(void)
       obj[n] = clampi((int)(vo < 0 ? vo - 0.5f : vo + 0.5f), -16, 16);
       any |= bg[n] | obj[n];
    }
+   {
+      float t = d3.tilt * k * 16.0f;
+      int t16 = (int)(t < 0 ? t - 0.5f : t + 0.5f);
+      video_thread_set_tilt(t16);
+      any |= t16;
+   }
    /* slider down: draw once, the frame hook shows it to both eyes */
    if (any)
       video_thread_set_stereo2(bg, obj);
@@ -1643,6 +1652,22 @@ static void make_paths(void)
    make_state_path();
 }
 
+/* Gyro sensor games (WarioWare: Twisted): the 3DS gyroscope stands in for
+ * the cartridge's. Same mapping as mGBA's 3DS port (raw rate in shared
+ * memory, the "y" entry is the rotation in the screen's plane). */
+extern int gpsp_gyro_z;
+int gpsp_gyro_present(void);
+static bool gyro_on;
+static void gyro_update(void)
+{
+   if (!gyro_on)
+      return;
+   {
+      angularRate g = *(const angularRate*)(uintptr_t)&hidSharedMem[0x5C];
+      gpsp_gyro_z = g.y >> 4;
+   }
+}
+
 static bool game_load(void)
 {
    struct retro_game_info info;
@@ -1653,6 +1678,8 @@ static bool game_load(void)
    if (!retro_load_game(&info))
       return false;
    game_loaded = true;
+   gpsp_gyro_z = 0;
+   gyro_on = gpsp_gyro_present() && R_SUCCEEDED(HIDUSER_EnableGyroscope());
    sram_load();
    profile_load_fwd();
    return true;
@@ -1665,6 +1692,11 @@ static void game_unload(void)
    sram_flush(true);
    retro_unload_game();
    game_loaded = false;
+   if (gyro_on)
+   {
+      HIDUSER_DisableGyroscope();
+      gyro_on = false;
+   }
    profile_leave_fwd();
 }
 
@@ -1904,7 +1936,7 @@ enum {
    /* Display */
    M_SIZE, M_SMOOTH, M_CSTYLE, M_SAT, M_BRIGHT, M_COLRESET,
    /* 3D */
-   M_3D, M_3DPCT, M_3DMETHOD, M_3DSMART, M_3DSTYLE, M_L0, M_L1, M_L2, M_L3, M_SPRITE, M_FOCUS, M_GAPFILL, M_PERGAME, M_3DRESET,
+   M_3D, M_3DPCT, M_3DMETHOD, M_3DSMART, M_3DSTYLE, M_L0, M_L1, M_L2, M_L3, M_SPRITE, M_FOCUS, M_TILT, M_GAPFILL, M_PERGAME, M_3DRESET,
    /* Speed */
    M_SKIP, M_ASTRETCH, M_STATS,
    /* System */
@@ -2023,6 +2055,7 @@ static void menu_build(int tab)
          mrow_slider(M_L3, "Far layer", d3.layer[3], -8, 8, "%+d", "GBA priority 3: usually sky and far\nbackgrounds.");
          mrow_slider(M_SPRITE, "Sprite pop", d3.sprite, -4, 4, "%+d", "Characters and objects (sprites) this\nmuch nearer than their layer.");
          mrow_slider(M_FOCUS, "Focus", d3.focus, -6, 6, "%+d", "Moves the whole picture nearer (+) or\nfurther (-) without changing spacing.");
+         mrow_slider(M_TILT, "Floor tilt", d3.tilt, -8, 8, "%+d", "Bottom of the screen nearer, top further.\nGives depth to roads in racing games.");
          mrow_toggle(M_GAPFILL, "Fill gaps", opt_gapfill, "Hide thin seams where two layers slide\napart (pink/black lines, e.g. Pokemon).");
          mrow_choice(M_PERGAME, "Settings for", d3_pergame ? "This game" : "All games",
                "This game: keep these 3D settings just\nfor this game (saved per game).");
@@ -2057,6 +2090,39 @@ static void menu_build(int tab)
 }
 
 /* apply a change: dir = -1 / +1 for steps, or 0 with a value (sliders) */
+/* The live preview behind the menu (re-drawing the game picture, ~10-30 ms
+ * on an Old 3DS) waits until the buttons have been still for a few frames,
+ * so the menu itself always reacts at once. */
+static int  preview_wait;
+static bool preview_cc;
+static void preview_later(bool colours)
+{
+   preview_wait = 6;
+   if (colours)
+      preview_cc = true;
+}
+static void preview_flush(void)
+{
+   if (preview_cc)
+   {
+      cc_rebuild();
+      preview_cc = false;
+   }
+   if (preview_wait)
+   {
+      preview_wait = 0;
+      preview_refresh();
+   }
+}
+static void preview_tick(void)
+{
+   if (preview_wait && --preview_wait == 0)
+   {
+      preview_wait = 1;
+      preview_flush();
+   }
+}
+
 static const char *menu_change(int id, int dir, bool has_value, int value)
 {
 #define STEP(v, lo, hi, st) do { int nv = has_value ? value : (v) + dir * (st); \
@@ -2068,33 +2134,34 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
    switch (id)
    {
       case M_SLOT:     CYCLEV(opt_slot, 10); make_state_path(); break;
-      case M_SIZE:     CYCLEV(opt_display, 3); preview_refresh(); break;
-      case M_SMOOTH:   CYCLEV(opt_smooth, 3); gpu_apply_filter(); preview_refresh();
+      case M_SIZE:     CYCLEV(opt_display, 3); preview_later(false); break;
+      case M_SMOOTH:   CYCLEV(opt_smooth, 3); gpu_apply_filter(); preview_later(false);
                        if (!GPU_ACTIVE) return "Scaling needs System > GPU display On";
                        if (opt_display == 0) return "Original size is always 1:1 sharp";
                        break;
-      case M_CSTYLE:   CYCLEV(opt_colorcorr, 3); cc_rebuild(); preview_refresh(); break;
-      case M_SAT:      STEP(opt_sat, 50, 150, 5); cc_rebuild(); preview_refresh(); break;
-      case M_BRIGHT:   STEP(opt_bright, 70, 130, 5); cc_rebuild(); preview_refresh(); break;
-      case M_3D:       d3.on ^= 1; preview_refresh();
+      case M_CSTYLE:   CYCLEV(opt_colorcorr, 3); preview_later(true); break;
+      case M_SAT:      STEP(opt_sat, 50, 150, 5); preview_later(true); break;
+      case M_BRIGHT:   STEP(opt_bright, 70, 130, 5); preview_later(true); break;
+      case M_3D:       d3.on ^= 1; preview_later(false);
                        if (d3.on && !video_thread_enabled) return "3D needs Draw on core 2 On";
                        break;
-      case M_3DPCT:    STEP(d3.pct, 0, 200, 10); preview_refresh(); break;
-      case M_3DMETHOD: d3.fast ^= 1; preview_refresh(); break;
-      case M_3DSMART:  d3.smart ^= 1; preview_refresh(); break;
+      case M_3DPCT:    STEP(d3.pct, 0, 200, 10); preview_later(false); break;
+      case M_3DMETHOD: d3.fast ^= 1; preview_later(false); break;
+      case M_3DSMART:  d3.smart ^= 1; preview_later(false); break;
       case M_3DSTYLE:
          CYCLEV(d3.style, D3_STYLES);
          d3_set_style(d3.style);
-         preview_refresh();
+         preview_later(false);
          break;
       case M_L0: case M_L1: case M_L2: case M_L3:
          STEP(d3.layer[id - M_L0], -8, 8, 1);
          d3.style = D3_STYLES - 1;   /* now Custom */
-         preview_refresh();
+         preview_later(false);
          break;
-      case M_SPRITE:   STEP(d3.sprite, -4, 4, 1); d3.style = D3_STYLES - 1; preview_refresh(); break;
-      case M_FOCUS:    STEP(d3.focus, -6, 6, 1); preview_refresh(); break;
-      case M_GAPFILL:  opt_gapfill ^= 1; video_thread_set_gap_fill(opt_gapfill); preview_refresh(); break;
+      case M_SPRITE:   STEP(d3.sprite, -4, 4, 1); d3.style = D3_STYLES - 1; preview_later(false); break;
+      case M_FOCUS:    STEP(d3.focus, -6, 6, 1); preview_later(false); break;
+      case M_TILT:     STEP(d3.tilt, -8, 8, 1); preview_later(false); break;
+      case M_GAPFILL:  opt_gapfill ^= 1; video_thread_set_gap_fill(opt_gapfill); preview_later(false); break;
       case M_PERGAME:
          if (d3_pergame)
          {
@@ -2104,7 +2171,7 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
             remove(p);
             d3 = d3_global;
             d3_pergame = false;
-            preview_refresh();
+            preview_later(false);
             return NULL;
          }
          d3_global = d3;      /* the current values are the all-games ones too */
@@ -2367,13 +2434,13 @@ static bool game_menu(void)
                   break;
                case M_COLRESET:
                   opt_colorcorr = 0; opt_sat = 100; opt_bright = 100;
-                  cc_rebuild(); preview_refresh();
+                  preview_later(true);
                   snprintf(note, sizeof(note), "Colours back to Original");
                   break;
                case M_3DRESET:
-                  d3.pct = 100; d3.style = 0; d3.sprite = 0; d3.focus = 0; d3.smart = 1; d3.fast = 0;
+                  d3.pct = 100; d3.style = 0; d3.sprite = 0; d3.focus = 0; d3.smart = 1; d3.fast = 0; d3.tilt = 0;
                   d3_set_style(0);
-                  preview_refresh();
+                  preview_later(false);
                   snprintf(note, sizeof(note), "3D back to Classic, 100%%");
                   break;
             }
@@ -2406,7 +2473,7 @@ static bool game_menu(void)
          {
             last_slider = sl;
             if (tab == 2 || stereo_mode)
-               preview_refresh();
+               preview_later(false);
          }
       }
 
@@ -2424,9 +2491,16 @@ static bool game_menu(void)
          ui_present();
          redraw = false;
       }
+      preview_tick();
       gspWaitForVBlank();
    }
 resume:
+   if (preview_cc)   /* colours changed just before closing the menu */
+   {
+      cc_rebuild();
+      preview_cc = false;
+   }
+   preview_wait = 0;
    config_save();
    profile_save();
    if (audio_ok)
@@ -2576,6 +2650,7 @@ static void run_game(void)
       bool drawn;
       hidScanInput();
       keys_held = hidKeysHeld();
+      gyro_update();
       if (hidKeysDown() & KEY_TOUCH)
       {
          frame_present_deferred();
@@ -2714,11 +2789,41 @@ static void run_game(void)
    }
 }
 
+/* Started with a game (forwarders / HOME Menu shortcuts pass the ROM path
+ * as the first argument): play it, and close the app when it ends. */
+static bool direct_launch, direct_pending;
+static void direct_launch_init(int argc, char **argv)
+{
+   const char *a = argc > 1 && argv ? argv[1] : NULL;
+   if (!a || !*a)
+      return;
+   if (a[0] == '/')
+      snprintf(rom_path, sizeof(rom_path), "sdmc:%s", a);
+   else
+      snprintf(rom_path, sizeof(rom_path), "%s", a);
+   if (!file_exists(rom_path))
+   {
+      rom_path[0] = 0;
+      return;
+   }
+   direct_launch = direct_pending = true;
+}
+static bool next_game(void)
+{
+   if (direct_pending)
+   {
+      direct_pending = false;
+      return true;
+   }
+   if (direct_launch)
+      return false;
+   return browse();
+}
+
 int main(int argc, char **argv)
 {
    aptHookCookie cookie;
    bool dynarec;
-   (void)argc; (void)argv;
 
    gfxInit(GSP_RGB565_OES, GSP_RGB565_OES, false);
    gfxSetDoubleBuffering(GFX_TOP, true);
@@ -2790,7 +2895,8 @@ int main(int argc, char **argv)
       gpu_guard_set("clearing the top screen with the GPU");
    clear_top();
    gpu_guard_clear();
-   while (!quit_app && browse())
+   direct_launch_init(argc, argv);
+   while (!quit_app && next_game())
    {
       {
          const char *nm = strrchr(rom_path, '/');

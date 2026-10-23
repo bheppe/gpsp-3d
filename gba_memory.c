@@ -1477,6 +1477,15 @@ typedef enum
 
 static bool rtc_enabled = false, rumble_enabled = false;
 
+/* Gyro sensor (WarioWare: Twisted), same protocol as mGBA: while pin 0 is
+ * high the sensor is sampled, then one bit (MSB first) comes out on pin 2
+ * at each falling edge of pin 1. The frontend sets gpsp_gyro_z (signed,
+ * about +-1024, 0 = still). */
+static bool gyro_enabled = false, gyro_edge = false;
+static u16 gyro_sample;
+int gpsp_gyro_z = 0;
+int gpsp_gyro_present(void) { return gyro_enabled; }
+
 // I/O registers (for RTC, rumble, etc)
 u8 gpio_regs[3];
 
@@ -1555,7 +1564,7 @@ static u8 encode_bcd(u8 value)
 }
 
 void update_gpio_romregs() {
-  if (rtc_enabled || rumble_enabled) {
+  if (rtc_enabled || rumble_enabled || gyro_enabled) {
     // Update the registers in the ROM mapped buffer.
     u8 *map = memory_map_read[0x8000000 >> 15];
     if (map) {
@@ -1725,6 +1734,24 @@ void function_cc write_gpio(u32 address, u32 value) {
 
   if (rumble_enabled && (prev_value & 0x8) != (gpio_regs[0] & 0x8))
     write_rumble(prev_value & 0x8, gpio_regs[0] & 0x8);
+
+  if (gyro_enabled && (address == 0xC4 || address == 0xC6))
+  {
+    bool out = gyro_edge && !(gpio_regs[0] & 2);   /* falling clock edge */
+    if (gpio_regs[0] & 1)
+    {
+      gyro_sample = (u16)(gpsp_gyro_z + 0x700);
+      out = true;
+    }
+    if (out)
+    {
+      u32 bit = gyro_sample >> 15;
+      gyro_sample <<= 1;
+      /* drive pin 2 only where the game set the pins to input */
+      gpio_regs[0] = (gpio_regs[0] & gpio_regs[1]) | ((bit << 2) & ~gpio_regs[1] & 0xF);
+    }
+    gyro_edge = (gpio_regs[0] & 2) != 0;
+  }
 
   // Reflect the values
   update_gpio_romregs();
@@ -1920,6 +1947,9 @@ static void load_game_config_over(const char *gamecode)
 
      if (gbaover[i].flags & FLAGS_RUMBLE)
        rumble_enabled = true;
+
+     if (!strncmp(gamecode, "RZW", 3))   /* WarioWare: Twisted (all regions) */
+       gyro_enabled = true;
 
      if (gbaover[i].flags & FLAGS_EEPROM)
        backup_type_reset = BACKUP_EEPROM;
@@ -3203,6 +3233,9 @@ u32 load_gamepak(const struct retro_game_info* info, const char *name,
    flash_bank_cnt = FLASH_SIZE_64KB;
    rtc_enabled = false;
    rumble_enabled = false;
+   gyro_enabled = false;
+   gyro_edge = false;
+   gyro_sample = 0;
    backup_type_reset = BACKUP_UNKN;
    backup_type_eeprom_guessed = 0;
    eeprom_really_used = 0;

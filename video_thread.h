@@ -64,6 +64,9 @@ void video_thread_set_smart_layers(int on);
  * (drawn once, pixels moved by their layer's depth, uncovered spots filled
  * from the further neighbour; about half the drawing work). */
 void video_thread_set_fast3d(int on);
+/* Floor tilt: depth added at the bottom line (and taken away at the top),
+ * in 1/16 px. 0 = off. */
+void video_thread_set_tilt(int tilt16);
 unsigned video_thread_last_wait_us(void);
 
 /* Frame skipping without stalls: call before retro_run() of a frame that
