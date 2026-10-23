@@ -1,0 +1,10 @@
+build/
+gen/
+lib/
+out/
+*.cia
+*.3dsx
+*.elf
+*.smdh
+*.map
+build.log
