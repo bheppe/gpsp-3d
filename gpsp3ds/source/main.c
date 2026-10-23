@@ -2576,7 +2576,8 @@ static float work_ms_avg = 16.0f;   /* main loop time per frame (smoothed) */
 static float emu_ms_avg = 12.0f;    /* the same without waiting for core 2 */
 static int   heavy_frames;
 static bool skip_heavy;      /* core 2 too slow for every frame */
-static int  skip_fits;       /* drawn pictures in a row that needed fewer skips */
+static int  skip_fits;       /* drawn pictures, for skip_hist */
+static u8   skip_hist[8];    /* frames skipped needed by the last 8 drawn pictures */
 static int  skip_phase;      /* heavy mode: 0 = draw (deferred), >0 = skips left */
 static int  skip_count;
 static u32  frames_drawn;
@@ -2606,6 +2607,7 @@ static bool frame_skip_plan(void)
    {
       skip_phase = 0;
       skip_count = 0;
+      memset(skip_hist, 0, sizeof(skip_hist));
       return true;
    }
    if (skip_phase == 0)
@@ -2617,18 +2619,17 @@ static bool frame_skip_plan(void)
       int need = (int)((c2 + 14999) / 15000) - 1;
       if (need < 1) need = 1;
       if (need > 5) need = 5;
-      /* Keep the rhythm steady: skip more at once when a picture needs it,
-       * but skip fewer only after a second of pictures that all fit, so it
-       * doesn't alternate 1-of-2 / 1-of-3 (which shows as small hitches). */
-      if (need >= skip_count)
+      /* Keep the rhythm steady: use the most any of the last 8 pictures
+       * needed, so one picture right at the edge doesn't make it alternate
+       * 1-of-2 / 1-of-3 (small hitches), yet it settles back within about
+       * a second after a heavy screen. */
       {
-         skip_count = need;
-         skip_fits = 0;
-      }
-      else if (++skip_fits >= 30)
-      {
-         skip_count--;
-         skip_fits = 0;
+         int k, most = need;
+         skip_hist[skip_fits++ & 7] = (u8)need;
+         for (k = 0; k < 8; k++)
+            if (skip_hist[k] > most)
+               most = skip_hist[k];
+         skip_count = most;
       }
       video_thread_defer_next_finish();
       skip_phase = skip_count;
