@@ -114,7 +114,7 @@ session. If it made your GBA games better, a tip helps keep fixes and
 new features coming: https://ko-fi.com/bheppe
 
 Bug reports and game test results help just as much. Post them under
-[Issues](../../issues).
+[Issues](../../issues). What's done and what's planned is in [ROADMAP.md](ROADMAP.md).
 
 ## Credits and licenses
 
