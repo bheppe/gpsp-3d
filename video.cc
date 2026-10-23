@@ -20,11 +20,29 @@
 
 extern "C" {
   #include "common.h"
+#ifndef VIDEO_RT
+  #include "video_thread.h"
+#endif
 }
+
+#ifdef VIDEO_RT
+  /* Threaded renderer, stereoscopic 3D: horizontal shift of sprites by their
+   * priority for the eye being drawn (set in video_thread.cc). */
+  #define VT_OBJ_XSHIFT(p) + vt_eye_obj_shift[(p) & 3]
+#else
+  #define VT_OBJ_XSHIFT(p)
+#endif
 
 u16* gba_screen_pixels = NULL;
 
 #define get_screen_pixels()   gba_screen_pixels
+
+/* Layer tracking for the threaded renderer's 3D (see video_thread.cc):
+ * records which layer drew each pixel. Nothing in the normal build. */
+#ifndef VIDEO_RT
+#define RT_TRACK_BEGIN(start, end, dst)
+#define RT_TRACK_END(start, end, dst, id)
+#endif
 #define get_screen_pitch()    GBA_SCREEN_PITCH
 
 typedef struct {
@@ -1487,7 +1505,7 @@ void render_scanline_objs(
     bool is_trans = ((obj_attr0 >> 10) & 0x3) == OBJ_MOD_SEMITRAN;
 
     t_sprite obji = {
-      .obj_x = (s32)(obj_attr1 << 23) >> 23,
+      .obj_x = ((s32)(obj_attr1 << 23) >> 23) VT_OBJ_XSHIFT(priority),
       .obj_y = obj_attr0 & 0xFF,
       .obj_w = obj_dim_table[obj_shape][obj_size][0],
       .obj_h = obj_dim_table[obj_shape][obj_size][1],
@@ -1918,6 +1936,7 @@ void tile_render_layers(u32 start, u32 end, dsttype *dst_ptr, u32 enabled_layers
       if (!base_done)
         fill_line_background<bgmode, dsttype>(start, end, dst_ptr);
 
+      RT_TRACK_BEGIN(start, end, dst_ptr);
       // Optimization: skip blending mode if no blending can happen to this layer
       if (objmode == STCKCOLOR && can_skip_blend)
         render_scanline_objs<dsttype, INDXCOLOR>(
@@ -1925,6 +1944,7 @@ void tile_render_layers(u32 start, u32 end, dsttype *dst_ptr, u32 enabled_layers
       else
         render_scanline_objs<dsttype, objmode>(
           layer & 0x3, start, end, dst_ptr, &palette_ram_converted[0x100]);
+      RT_TRACK_END(start, end, dst_ptr, 4 + (layer & 3));
 
       base_done = 1;
     }
@@ -1934,6 +1954,12 @@ void tile_render_layers(u32 start, u32 end, dsttype *dst_ptr, u32 enabled_layers
 
       bool is_affine = (video_mode >= 1) && (layer >= 2);
       u32 fnidx = (base_done) | (is_affine ? 2 : 0);
+#ifdef VIDEO_RT
+      /* layer tracking: the base layer's transparent pixels are backdrop */
+      if (rt_track && !base_done)
+        fill_line_background<bgmode, dsttype>(start, end, dst_ptr);
+#endif
+      RT_TRACK_BEGIN(start, end, dst_ptr);
 
       // Can optimize rendering if no blending can really happen.
       // If stack mode, no blending and not base layer, we might speed up a bit
@@ -1954,6 +1980,7 @@ void tile_render_layers(u32 start, u32 end, dsttype *dst_ptr, u32 enabled_layers
         };
         rdfns[fnidx](layer, start, end, dst_ptr, palette_ram_converted);
       }
+      RT_TRACK_END(start, end, dst_ptr, layer);
 
       base_done = 1;
     }
@@ -2124,6 +2151,7 @@ static void bitmap_render_layers(
       if (enable_flags & 0x10) {
         bool can_skip_blend = !has_trans_obj && !objlayer_is_1st_tgt;
 
+        RT_TRACK_BEGIN(start, end, scanline);
         // Optimization: skip blending mode if no blending can happen to this layer
         if (objmode == STCKCOLOR && can_skip_blend)
           render_scanline_objs<dsttype, INDXCOLOR>(
@@ -2131,6 +2159,7 @@ static void bitmap_render_layers(
         else
           render_scanline_objs<dsttype, objmode>(
             current_layer & 3, start, end, scanline, &palette_ram_converted[0x100]);
+        RT_TRACK_END(start, end, scanline, 4 + (current_layer & 3));
       }
     }
     else
@@ -2144,12 +2173,14 @@ static void bitmap_render_layers(
         const bitmap_layer_render_struct *rd =
           (bgmode == STCKCOLOR && can_skip_blend) ? idxm_rend : mode_rend;
 
+        RT_TRACK_BEGIN(start, end, scanline);
         if (dy)
           rd->affine_render(start, end, scanline, palette_ram_converted);
         else if (dx == 256)
           rd->blit_render(start, end, scanline, palette_ram_converted);
         else
           rd->scale_render(start, end, scanline, palette_ram_converted);
+        RT_TRACK_END(start, end, scanline, 2);
       }
     }
   }
@@ -2354,21 +2385,29 @@ void update_scanline(void)
   if(skip_next_frame)
     return;
 
-  // If OAM has been modified since the last scanline has been updated then
-  // reorder and reprofile the OBJ lists.
-  if(reg[OAM_UPDATED])
-  {
-    order_obj(video_mode);
-    reg[OAM_UPDATED] = 0;
-  }
-
-  order_layers((dispcnt >> 8) & active_layers[video_mode], vcount);
-
-  // If the screen is in in forced blank draw pure white.
-  if(dispcnt & 0x80)
-    memset(screen_offset, 0xff, 240*sizeof(u16));
+#ifndef VIDEO_RT
+  // Threaded renderer: just record this line, a second core draws it.
+  if(video_thread_enabled)
+    video_thread_record_line(vcount);
   else
-    render_scanline_window(screen_offset);
+#endif
+  {
+    // If OAM has been modified since the last scanline has been updated then
+    // reorder and reprofile the OBJ lists.
+    if(reg[OAM_UPDATED])
+    {
+      order_obj(video_mode);
+      reg[OAM_UPDATED] = 0;
+    }
+
+    order_layers((dispcnt >> 8) & active_layers[video_mode], vcount);
+
+    // If the screen is in in forced blank draw pure white.
+    if(dispcnt & 0x80)
+      memset(screen_offset, 0xff, 240*sizeof(u16));
+    else
+      render_scanline_window(screen_offset);
+  }
 
   // Mode 0 does not use any affine params at all.
   if (video_mode) {

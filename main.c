@@ -18,6 +18,7 @@
  */
 
 #include "common.h"
+#include "profiler.h"
 #include <ctype.h>
 
 timer_type timer[4];
@@ -126,6 +127,9 @@ void init_main(void)
 
 u32 function_cc update_gba(int remaining_cycles)
 {
+#ifdef GPSP_PROFILE
+  prof_sample_pc(reg[REG_PC], reg[REG_CPSR]);
+#endif
   u32 changed_pc = 0;
   u32 frame_complete = 0;
   irq_type irq_raised = IRQ_NONE;
@@ -141,6 +145,10 @@ u32 function_cc update_gba(int remaining_cycles)
     // (remaining_cycles can be negative and should be close to zero)
     unsigned completed_cycles = execute_cycles - remaining_cycles;
     cpu_ticks += completed_cycles;
+#ifdef GPSP_PROFILE
+    if (reg[CPU_HALT_STATE] != CPU_ACTIVE)
+      prof_halt_cycles += completed_cycles;
+#endif
 
     remaining_cycles = 0;
 
@@ -175,7 +183,11 @@ u32 function_cc update_gba(int remaining_cycles)
           if(reg[OAM_UPDATED])
             oam_update_count++;
 
-          update_scanline();
+          {
+            PROF_BEGIN(t_scan);
+            update_scanline();
+            PROF_END(t_scan, prof_video);
+          }
 
           // Trigger the HBlank DMAs if enabled
           for (i = 0; i < 4; i++)
@@ -237,7 +249,11 @@ u32 function_cc update_gba(int remaining_cycles)
           flush_ram_count = 0;
 
           // Force audio generation. Need to flush samples for this frame.
-          render_gbc_sound();
+          {
+            PROF_BEGIN(t_snd);
+            render_gbc_sound();
+            PROF_END(t_snd, prof_sound);
+          }
 
           // We completed a frame, tell the dynarec to exit to the main thread
           frame_complete = 0x80000000;

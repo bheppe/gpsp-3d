@@ -97,6 +97,8 @@ _##symbol:
 .equ REG_V_FLAG,        (23 * 4)
 .equ REG_SLEEP_CYCLES,  (24 * 4)
 .equ OAM_UPDATED,       (25 * 4)
+.equ PAL_UPDATED,       (63 * 4)
+.equ VRAM_UPDATED,      (62 * 4)
 .equ REG_SAVE,          (26 * 4)
 
 .equ load_u8_tbl,           -(9 * 16 * ADDR_SIZE_BYTES)
@@ -363,6 +365,8 @@ ext_##fname##_vram##wsize:                                                   ;\
   sub $0x8000, %eax                                   /* Mirror last bank */ ;\
 1:                                                                           ;\
   mov regfn16(d), VRAM_OFF(REG_BASE, FULLREG(ax))         /* Actual write */ ;\
+  shr $12, %eax                                      /* 4KB block written */ ;\
+  btsl %eax, VRAM_UPDATED(REG_BASE)                     /* mark it dirty */ ;\
   ret                                                                        ;\
                                                                              ;\
 ext_##fname##_oam##wsize:                                                    ;\
@@ -394,6 +398,7 @@ ext_store_palette8:
 ext_store_palette16:
   and $0x3FF, %eax            # wrap around address
 ext_store_palette16b:         # entry point for 8bit write
+  movl $1, PAL_UPDATED(REG_BASE)  # flag palette change (threaded renderer)
   mov %dx, PALETTE_RAM_OFF(REG_BASE, FULLREG(ax)) # write out palette value
   mov %edx, %ecx              # cx = dx
   shl $11, %ecx               # cx <<= 11 (red component is in high bits)

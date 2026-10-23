@@ -13,7 +13,9 @@
 #include "libretro_core_options.h"
 
 #include "../gba_memory.h"
+#include "../video_thread.h"
 #include "../gba_cc_lut.h"
+#include "../profiler.h"
 
 #if defined(VITA) && defined(HAVE_DYNAREC)
 #include <psp2/kernel/sysmem.h>
@@ -37,7 +39,7 @@ void* linearMemAlign(size_t size, size_t alignment);
 void linearFree(void* mem);
 #if defined(HAVE_DYNAREC)
 #include <malloc.h>
-#include "3ds/3ds_utils.h"
+#include "../3ds/3ds_utils.h"
 #define MEMOP_PROT   6
 #define MEMOP_MAP 4
 #define MEMOP_UNMAP 5
@@ -96,6 +98,7 @@ static void gpsp_apply_sound_rate(const char *value, retro_environment_t reinit_
 #define FRAMESKIP_MAX 30
 
 u32 skip_next_frame                          = 0;
+int gpsp_frontend_skip                       = 0;  /* set by the gpSP 3D frontend */
 static frameskip_type current_frameskip_type = no_frameskip;
 static u32 frameskip_threshold               = 0;
 static u32 frameskip_interval                = 0;
@@ -464,6 +467,22 @@ static void video_run(void)
       return;
    }
 
+   if (video_thread_enabled)
+   {
+      const u16 *drawn = video_thread_finish_frame();
+      if (!drawn)
+      {
+         video_cb(NULL, GBA_SCREEN_WIDTH, GBA_SCREEN_HEIGHT,
+               GBA_SCREEN_PITCH * 2);
+         return;
+      }
+      if (video_post_process)
+         memcpy(gba_screen_pixels, drawn,
+               GBA_SCREEN_PITCH * GBA_SCREEN_HEIGHT * sizeof(u16));
+      else
+         gba_screen_pixels_buf = (u16*)drawn;
+   }
+
    if (video_post_process)
    {
       video_post_process();
@@ -798,6 +817,9 @@ void retro_set_environment(retro_environment_t cb)
    struct retro_vfs_interface_info vfs_iface_info;
 
    environ_cb = cb;
+#ifdef GPSP_PROFILE
+   prof_init((void*)cb);
+#endif
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log))
       log_cb = log.log;
@@ -1123,6 +1145,17 @@ static void check_variables(bool started_from_load)
        (post_process_mix != post_process_mix_prev))
       init_post_processing();
 
+#ifdef GPSP_PROFILE
+   var.key   = "gpsp_profile";
+   var.value = NULL;
+   {
+      bool want = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value && !strcmp(var.value, "enabled");
+      if (want != prof_enabled)
+         prof_reset();
+      prof_enabled = want;
+   }
+#endif
+
    var.key           = "gpsp_turbo_period";
    var.value         = NULL;
    turbo_period      = TURBO_PERIOD_MIN;
@@ -1435,6 +1468,13 @@ void retro_run(void)
       }
    }
 
+   /* gpSP 3D frontend: skip drawing this frame (set before retro_run) */
+   if (gpsp_frontend_skip)
+   {
+      skip_next_frame    = 1;
+      gpsp_frontend_skip = 0;
+   }
+
    /* If frameskip settings have changed, update
     * frontend audio latency */
    if (update_audio_latency)
@@ -1444,6 +1484,9 @@ void retro_run(void)
       update_audio_latency = false;
    }
 
+#ifdef GPSP_PROFILE
+   prof_frame_begin();
+#endif
    /* This runs just a frame */
    #ifdef HAVE_DYNAREC
    if (dynarec_enable)
@@ -1463,8 +1506,17 @@ void retro_run(void)
      rumble_cb(0, RETRO_RUMBLE_STRONG, MIN(strength, 0xffff) / 2);
    }
 
+#ifdef GPSP_PROFILE
+   prof_mark_emu_done();
+#endif
    audio_run();
+#ifdef GPSP_PROFILE
+   prof_mark_audio_done();
+#endif
    video_run();
+#ifdef GPSP_PROFILE
+   prof_frame_end();
+#endif
 
    switch (serial_mode) {
    case SERIAL_MODE_RFU:

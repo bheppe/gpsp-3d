@@ -41,6 +41,8 @@ _##symbol:
 #define REG_V_FLAG        (23 * 4)
 #define REG_SLEEP_CYCLES  (24 * 4)
 #define OAM_UPDATED       (25 * 4)
+#define PAL_UPDATED       (63 * 4)
+#define VRAM_UPDATED      (62 * 4)
 
 #define CPU_ALERT_HALT    (1 << 0)
 #define CPU_ALERT_SMC     (1 << 1)
@@ -566,6 +568,12 @@ ext_store_vram_u##store_type:                                                ;\
   add r2, reg_base, #VRAM_OFF             /* r2 = vram base                */;\
   restore_flags()                                                            ;\
   str_op16 r1, [r0, r2]                   /* store data                    */;\
+  mov r0, r0, lsr #12                     /* 4KB block written             */;\
+  mov r1, #1                                                                 ;\
+  mov r1, r1, lsl r0                                                         ;\
+  ldr r2, [reg_base, #VRAM_UPDATED]       /* mark it in the dirty mask     */;\
+  orr r2, r2, r1                                                             ;\
+  str r2, [reg_base, #VRAM_UPDATED]                                          ;\
   add pc, lr, #4                          /* return                        */;\
                                                                              ;\
 ext_store_oam_ram_u##store_type:                                             ;\
@@ -617,6 +625,7 @@ ext_store_palette_u8:
 ext_store_palette_u16:
   mask_addr_16(10)                        // Accesses are always 16 bit
   add r2, reg_base, #PAL_RAM_OFF          // r2 = palette base
+  str r2, [reg_base, #PAL_UPDATED]        // flag palette change (non zero)
   strh r1, [r0, r2]                       // store data
 
   and r2, r1, #0x3E0                      // Convert color point
@@ -634,6 +643,7 @@ ext_store_palette_u32_safe:
 ext_store_palette_u32:
   mask_addr_32(10)                        // Accesses are always 16 bit
   add r2, reg_base, #PAL_RAM_OFF          // r2 = palette base
+  str r2, [reg_base, #PAL_UPDATED]        // flag palette change (non zero)
   str r1, [r0, r2]                        // store data
   add r2, reg_base, #PAL_CONV_OFF         // r2 = converted palette ram
 
@@ -685,6 +695,12 @@ ext_store_vram_u32_safe:
   cmp r0, #0x18000                        @ Check if exceeds 96KB
   subcs r0, r0, #0x8000                   @ Mirror to the last bank
   str r1, [r0, r2]                        @ store data
+  mov r0, r0, lsr #12                     @ 4KB block written
+  mov r1, #1
+  mov r1, r1, lsl r0
+  ldr r2, [reg_base, #VRAM_UPDATED]       @ mark it in the dirty mask
+  orr r2, r2, r1
+  str r2, [reg_base, #VRAM_UPDATED]
   restore_flags()
   bx lr                                   @ Return
 

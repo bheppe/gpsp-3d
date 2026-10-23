@@ -1275,6 +1275,7 @@ cpu_alert_type function_cc write_io_register32(u32 address, u32 value)
 
 #define write_palette8(address, value)                                        \
 {                                                                             \
+  reg[REG_PAL_UPDATED] = 1;                                                  \
   u32 aladdr = address & ~1U;                                                 \
   u16 val16 = (value << 8) | value;                                           \
   address16(palette_ram, aladdr) = eswap16(val16);                            \
@@ -1283,6 +1284,7 @@ cpu_alert_type function_cc write_io_register32(u32 address, u32 value)
 
 #define write_palette16(address, value)                                       \
 {                                                                             \
+  reg[REG_PAL_UPDATED] = 1;                                                  \
   u32 palette_address = address;                                              \
   address16(palette_ram, palette_address) = eswap16(value);                   \
   value = convert_palette(value);                                             \
@@ -1291,6 +1293,7 @@ cpu_alert_type function_cc write_io_register32(u32 address, u32 value)
 
 #define write_palette32(address, value)                                       \
 {                                                                             \
+  reg[REG_PAL_UPDATED] = 1;                                                  \
   u32 palette_address = address;                                              \
   u32 value_high = value >> 16;                                               \
   u32 value_low = value & 0xFFFF;                                             \
@@ -1433,14 +1436,21 @@ void function_cc write_backup(u32 address, u32 value)
 
 #define write_backup32()                                                      \
 
+/* REG_VRAM_UPDATED: one bit per 4KB block of VRAM written since the threaded
+ * renderer last copied it (bits 0..23). */
+#define vram_mark(a) reg[REG_VRAM_UPDATED] |= 1u << ((a) >> 12)
+
 #define write_vram8()                                                         \
+  vram_mark(address);                                                         \
   address &= ~0x01;                                                           \
   address16(vram, address) = eswap16((value << 8) | value)                    \
 
 #define write_vram16()                                                        \
+  vram_mark(address);                                                         \
   address16(vram, address) = eswap16(value)                                   \
 
 #define write_vram32()                                                        \
+  vram_mark(address);                                                         \
   address32(vram, address) = eswap32(value)                                   \
 
 // RTC code derived from VBA's (due to lack of any real publically available
@@ -2080,6 +2090,7 @@ const dma_region_type dma_region_map[17] =
 #define dma_write_vram(type, tfsize) {                                        \
   u32 wraddr = type##_ptr & 0x1FFFF;                                          \
   if (wraddr >= 0x18000) wraddr -= 0x8000;                                    \
+  vram_mark(wraddr);                                                          \
   address##tfsize(vram, wraddr) = eswap##tfsize(read_value);                  \
 }
 
@@ -2598,9 +2609,11 @@ void init_memory(void)
   memset(io_registers, 0, sizeof(io_registers));
   memset(oam_ram, 0, sizeof(oam_ram));
   memset(palette_ram, 0, sizeof(palette_ram));
+  reg[REG_PAL_UPDATED] = 1;
   memset(iwram, 0, sizeof(iwram));
   memset(ewram, 0, sizeof(ewram));
   memset(vram, 0, sizeof(vram));
+  reg[REG_VRAM_UPDATED] = 0xFFFFFF;
 
   write_ioreg(REG_DISPCNT, 0x80);
   write_ioreg(REG_P1, 0x3FF);
@@ -2946,6 +2959,19 @@ static s32 load_gamepak_raw(const char *name)
 
     // Unmap the ROM space since we will re-map it now
     map_null(read, 0x8000000, 0xD000000);
+
+    /* Forget the previous game's pages: otherwise evict_gamepak_page() below
+     * unmaps page numbers the previous game had loaded, which are pages of
+     * this game that were just mapped (crash when a second game is loaded
+     * without retro_deinit/retro_init in between). */
+    for (i = 0; i < 1024; i++)
+    {
+      gamepak_blk_queue[i].next_lru = (u16)(i + 1);
+      gamepak_blk_queue[i].phy_rom = -1;
+    }
+    gamepak_lru_head = 0;
+    gamepak_lru_tail = 32 * gamepak_buffer_count - 1;
+    memset(gamepak_sticky_bit, 0, sizeof(gamepak_sticky_bit));
 
     // Proceed to read the whole ROM or as much as possible.
     for (i = 0; i < ldblks; i++)

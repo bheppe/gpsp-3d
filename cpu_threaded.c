@@ -22,6 +22,7 @@
 // - block memory needs psr swapping and user mode reg swapping
 
 #include "common.h"
+#include "profiler.h"
 #include "memmap.h"
 #if defined(VITA)
 #include <psp2/kernel/sysmem.h>
@@ -2661,11 +2662,13 @@ u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
         bool result;                                                          \
         u8 *blkptr = ram_translation_ptr + block_prologue_size;               \
         trentry->offset_##type = blkptr - ram_translation_cache;              \
+        PROF_BEGIN(t_xl);                                                     \
         translate_depth++;                                                    \
         result = translate_block_##type(pc, true);                            \
         if (result && translate_depth == 1)                                   \
           result = process_deferred_exits();                                  \
         translate_depth--;                                                    \
+        if (!translate_depth) PROF_END(t_xl, prof_xlate);                     \
         if (!result && !translate_depth)                                      \
           deferred_exit_count = 0;                                            \
                                                                               \
@@ -2708,11 +2711,13 @@ u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
         *blk_offset_addr = (u32)(rom_translation_ptr - rom_translation_cache);\
         rom_translation_ptr += sizeof(hashhdr_type);                          \
         blkptr = rom_translation_ptr + block_prologue_size;                   \
+        PROF_BEGIN(t_xl);                                                     \
         translate_depth++;                                                    \
         result = translate_block_##type(pc, false);                           \
         if (result && translate_depth == 1)                                   \
           result = process_deferred_exits();                                  \
         translate_depth--;                                                    \
+        if (!translate_depth) PROF_END(t_xl, prof_xlate);                     \
         if (!result && !translate_depth)                                      \
           deferred_exit_count = 0;                                            \
                                                                               \
@@ -3444,6 +3449,9 @@ void flush_translation_cache_ram(void)
 {
   /* Flushes RAM caches avoiding doing too much work (ie. wiping unused memory) */
   flush_ram_count++;
+#ifdef GPSP_PROFILE
+  prof_ram_flushes++;
+#endif
   /*printf("ram flush %d (pc %x), %x to %x, %x to %x\n",
    flush_ram_count, reg[REG_PC], iwram_code_min, iwram_code_max,
    ewram_code_min, ewram_code_max);*/
@@ -3480,6 +3488,9 @@ void flush_translation_cache_ram(void)
 
 void flush_translation_cache_rom(void)
 {
+#ifdef GPSP_PROFILE
+  prof_rom_flushes++;
+#endif
   /* We flush the generated code except for everything below the watermark. */
   last_rom_translation_ptr = &rom_translation_cache[rom_cache_watermark];
   rom_translation_ptr      = &rom_translation_cache[rom_cache_watermark];

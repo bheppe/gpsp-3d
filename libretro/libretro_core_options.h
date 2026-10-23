@@ -12,7 +12,7 @@
 #endif
 
 #if defined(_3DS) && defined(HAVE_DYNAREC)
-#include "3ds/3ds_utils.h"
+#include "../3ds/3ds_utils.h"
 #endif
 
 /*
@@ -241,6 +241,19 @@ struct retro_core_option_definition option_defs_us[] = {
       },
       "disabled"
    },
+#ifdef GPSP_PROFILE
+   {
+      "gpsp_profile",
+      "Profiler overlay",
+      "Shows average milliseconds per frame spent in each part of the emulator (16.7 = full speed) and logs details to gpsp_profile.txt in the save folder.",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "enabled"
+   },
+#endif
    {
       "gpsp_turbo_period",
       "Turbo Button Period",

@@ -5,6 +5,7 @@ INCFLAGS   := -I$(CORE_DIR)/libretro -I$(LIBRETRO_COMM_DIR)/include  -I$(CORE_DI
 SOURCES_ASM := $(CORE_DIR)/bios_data.S
 
 SOURCES_CC := $(CORE_DIR)/video.cc \
+              $(CORE_DIR)/video_thread.cc \
               $(CORE_DIR)/cpu.cc
 
 SOURCES_C := $(CORE_DIR)/main.c \
@@ -20,6 +21,8 @@ SOURCES_C := $(CORE_DIR)/main.c \
              $(CORE_DIR)/serial_proto.c \
              $(CORE_DIR)/libretro/libretro.c \
              $(CORE_DIR)/gba_cc_lut.c \
+             $(CORE_DIR)/profiler.c \
+             $(CORE_DIR)/video_thread_sys.c \
              $(LIBRETRO_COMM_DIR)/compat/compat_posix_string.c \
              $(LIBRETRO_COMM_DIR)/compat/compat_strl.c \
              $(LIBRETRO_COMM_DIR)/compat/fopen_utf8.c \

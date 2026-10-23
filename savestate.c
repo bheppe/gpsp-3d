@@ -159,6 +159,8 @@ bool gba_load_state(const void* src)
 
   instruction_count = 0;
   reg[OAM_UPDATED] = 1;
+  reg[REG_PAL_UPDATED] = 1;
+  reg[REG_VRAM_UPDATED] = 0xFFFFFF;
 
   return true;
 }

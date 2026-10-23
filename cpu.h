@@ -104,6 +104,10 @@ typedef enum
   /* Machine defined storage */
   REG_USERDEF       = 32,
 
+  /* Set whenever VRAM / palette RAM is written (used by the threaded renderer) */
+  REG_VRAM_UPDATED  = 62,
+  REG_PAL_UPDATED   = 63,
+
   REG_MAX           = 64
 } ext_reg_numbers;
 
