@@ -235,7 +235,7 @@ void scr_browser(const char *path, const char *const *names, const unsigned char
    ui_text(&ui_font_title, 10, 3, "gpSP 3D", C_TEXT, 0);
    ui_rrect(92, 8, 30, 15, 7, C_ACCENT2);
    ui_text_center(&ui_font_small, 107, 9, "3D", C_TEXT);
-   ui_text_right(&ui_font_small, UI_W - 10, 10, "v" GPSP3D_VERSION, C_DIM);
+   ui_text_right(&ui_font_small, UI_W - 10, 10, "v" GPSP3D_VERSION "  by bheppe", C_DIM);
    ui_text(&ui_font_small, 10, 24, path, C_FAINT, UI_W - 20);
 
    if (!n)
