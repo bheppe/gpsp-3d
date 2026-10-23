@@ -28,6 +28,51 @@
 u32 __ctru_linear_heap_size = 6 * 1024 * 1024;
 u32 __stacksize__           = 1024 * 1024;
 
+/* libctru gives the normal heap all remaining memory. On a New 3DS (124 MB
+ * mode) that is ~115 MB, more than the 96 MB heap address range, so the
+ * allocation failed and the app crashed at launch (svcBreak in
+ * __system_allocateHeaps). Same logic as libctru, with the heap capped. */
+#include <3ds/allocator/mappable.h>
+#ifndef OS_HEAP_AREA_BEGIN
+#define OS_HEAP_AREA_BEGIN 0x08000000
+#define OS_HEAP_AREA_END   0x0E000000
+#endif
+#define GPSP3D_HEAP_CAP (80u << 20)
+extern char *fake_heap_start, *fake_heap_end;
+extern u32 __ctru_heap, __ctru_heap_size, __ctru_linear_heap;
+void __system_allocateHeaps(void)
+{
+   Handle reslimit = 0;
+   ResourceLimitType type = RESLIMIT_COMMIT;
+   s64 max_commit = 0, cur_commit = 0;
+   u32 remaining;
+
+   if (R_FAILED(svcGetResourceLimit(&reslimit, CUR_PROCESS_HANDLE)))
+      svcBreak(USERBREAK_PANIC);
+   svcGetResourceLimitLimitValues(&max_commit, reslimit, &type, 1);
+   svcGetResourceLimitCurrentValues(&cur_commit, reslimit, &type, 1);
+   svcCloseHandle(reslimit);
+   remaining = (u32)(max_commit - cur_commit) & ~0xFFF;
+
+   if (__ctru_linear_heap_size + (1u << 20) > remaining)
+      svcBreak(USERBREAK_PANIC);
+   __ctru_heap_size = remaining - __ctru_linear_heap_size;
+   if (__ctru_heap_size > GPSP3D_HEAP_CAP)
+      __ctru_heap_size = GPSP3D_HEAP_CAP;
+   if (__ctru_heap_size > OS_HEAP_AREA_END - OS_HEAP_AREA_BEGIN)
+      __ctru_heap_size = OS_HEAP_AREA_END - OS_HEAP_AREA_BEGIN;
+
+   if (R_FAILED(svcControlMemory(&__ctru_heap, OS_HEAP_AREA_BEGIN, 0x0, __ctru_heap_size,
+                                 MEMOP_ALLOC, MEMPERM_READ | MEMPERM_WRITE)))
+      svcBreak(USERBREAK_PANIC);
+   if (R_FAILED(svcControlMemory(&__ctru_linear_heap, 0x0, 0x0, __ctru_linear_heap_size,
+                                 MEMOP_ALLOC_LINEAR, MEMPERM_READ | MEMPERM_WRITE)))
+      svcBreak(USERBREAK_PANIC);
+   mappableInit(OS_MAP_AREA_BEGIN, OS_MAP_AREA_END);
+   fake_heap_start = (char*)__ctru_heap;
+   fake_heap_end   = fake_heap_start + __ctru_heap_size;
+}
+
 /* From ctr_svchax.c (RetroArch): gives the process the kernel access the
  * dynarec needs (mapping its code cache executable, flushing caches). */
 extern u32 __ctr_svchax;
