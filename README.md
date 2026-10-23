@@ -7,6 +7,8 @@ gpSP 3D is a standalone 3DS app built on [gpSP](https://github.com/libretro/gpsp
 its own depth, so maps, characters, HUDs and backgrounds separate when you
 raise the 3D slider. No RetroArch needed.
 
+**Discord** (help, game reports, test builds): https://discord.gg/pBWY3fRgnU
+
 > This repository is a fork of [libretro/gpsp](https://github.com/libretro/gpsp).
 > The original gpSP readme is in [README.gpsp.md](README.gpsp.md).
 
@@ -105,8 +107,8 @@ packages (`3ds-dev`, which includes libctru, citro3d and picasso), plus
 `makerom` and `bannertool` in your PATH.
 
 ```
-git clone https://github.com/bheppe/gpsp
-bash gpsp/gpsp3ds/build-gpsp3ds.sh
+git clone https://github.com/bheppe/gpsp-3d
+bash gpsp-3d/gpsp3ds/build-gpsp3ds.sh
 ```
 
 The script builds the gpSP core (`make platform=ctr`), then the app, then the
@@ -134,7 +136,7 @@ session. If it made your GBA games better, a tip helps keep fixes and
 new features coming: https://ko-fi.com/bheppe
 
 Bug reports and game test results help just as much. Post them under
-[Issues](../../issues). What's done and what's planned is in [ROADMAP.md](ROADMAP.md).
+[Issues](../../issues) or on [Discord](https://discord.gg/pBWY3fRgnU). What's done and what's planned is in [ROADMAP.md](ROADMAP.md).
 
 ## Credits and licenses
 
