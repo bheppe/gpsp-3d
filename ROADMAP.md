@@ -16,6 +16,8 @@ What's been reported, what's done, and what's next. Reports come from
 | v0.1.1 | **Gyro sensor** for WarioWare: Twisted, from the 3DS gyroscope | 🧪 needs the game |
 | v0.1.1 | **Forwarder support**: a ROM path as the launch argument plays that game directly | 🧪 needs forwarder tools tested |
 | v0.1.1 | Ko-fi / GitHub Sponsors button, README Support section | ✅ |
+| v0.1.1 | **Display → Screen effect**: Scanlines, LCD grid | 🧪 |
+| v0.1.1 | **HOME Menu icons per game**: `make-forwarders.sh` builds one forwarder CIA per game | 🧪 |
 
 ## Open
 
@@ -29,9 +31,9 @@ What's been reported, what's done, and what's next. Reports come from
 | 6 | Sega Rally, V-Rally 3 look flat | Male_Inkling | 🧪 try 3D → Floor tilt (v0.1.1) |
 | 7 | Game list feels laggy on Old 3DS | Cabjoy | 📋 waiting for details |
 | 8 | Original (1:1) screen size is small | ROMANREIGNS599 | ✅ use Display → Screen size → Fit + Scaling → Crisp |
-| 9 | HOME Menu icons per game | Clean-Space7974, Mumpmander | 📋 forwarder groundwork in v0.1.1 |
-| 10 | CRT / retro screen filters | ClockIllustrious2077 | 📋 |
-| 11 | RetroAchievements | MysticFlipFlop (#1) | 💤 |
+| 9 | HOME Menu icons per game | Clean-Space7974, Mumpmander | 🧪 in v0.1.1 |
+| 10 | CRT / retro screen filters | ClockIllustrious2077 | 🧪 in v0.1.1 (Scanlines, LCD grid) |
+| 11 | RetroAchievements | MysticFlipFlop (#1) | 📋 v0.1.2 (casual mode first) |
 | 12 | Link cable between two 3DS consoles | Han_Solo6712 | 💤 |
 | 13 | Faster 3D drawing on Old 3DS (3D pictures refresh ~30/s now) | — | 💤 |
 | 14 | Per-layer 3D for other emulators (PS1 / PCSX) | _SleepyLark_, LargoLaGrande1, goldaxis | 💤 |

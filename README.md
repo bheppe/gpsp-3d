@@ -35,6 +35,8 @@ raise the 3D slider. No RetroArch needed.
 - **Gyro sensor** for WarioWare: Twisted, using the 3DS gyroscope.
 - **Forwarder support.** Started with a ROM path as its first argument, the
   app plays that game directly and closes when you quit.
+- **Screen effects**: Scanlines and LCD grid (Display -> Screen effect).
+- **HOME Menu icons per game** (forwarders), see below.
 - **Saves are shared with RetroArch.** Saves go to RetroArch's save folder if
   it exists, so you can switch between the two.
 
@@ -77,6 +79,24 @@ raise the 3D slider. No RetroArch needed.
 If the app ever freezes while starting the GPU display, the next launch shows
 a message and turns **System -> GPU display** off, so you can always get back
 in.
+
+## HOME Menu icons for your games
+
+You can give each game its own HOME Menu icon that starts gpSP 3D straight
+into it (a "forwarder"). gpSP 3D must be installed as a CIA.
+
+1. Put the SD card in your PC (or copy the games folder over).
+2. In the devkitPro shell, run, with your own folders:
+   ```
+   bash gpsp3ds/make-forwarders.sh /e/roms/gba /roms/gba
+   ```
+   The first folder is where the games are on the PC, the second is the same
+   folder on the 3DS SD card.
+3. Install the CIAs from `gpsp3ds/out/forwarders/` with FBI.
+
+For a custom icon, put a 48x48 PNG with the game's name next to it
+(`Pokemon Emerald.gba` -> `Pokemon Emerald.png`). Other forwarder tools that
+start `gpsp3d.3dsx` with the game's path as its argument also work.
 
 ## Building
 

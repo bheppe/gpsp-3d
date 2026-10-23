@@ -8,3 +8,6 @@ out/
 *.smdh
 *.map
 build.log
+forwarder/build/
+forwarder/*.elf
+forwarder/*.map

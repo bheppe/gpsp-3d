@@ -105,6 +105,7 @@ void     video_thread_counters(unsigned *copies, unsigned *syncs);
 
 #define APP_DIR      "sdmc:/3ds/gpsp3d"
 #define CONFIG_PATH  APP_DIR "/gpsp3d.cfg"
+#define LAUNCH_PATH  APP_DIR "/launch.txt"   /* written by HOME Menu forwarders */
 /* RetroArch 3DS keeps game saves here (DEFAULT_DIR_SRAM = cores/savefiles) */
 #define RA_SAVE_DIR  "sdmc:/retroarch/cores/savefiles"
 #define RA_SAVE_DIR2 "sdmc:/retroarch/saves"
@@ -142,6 +143,7 @@ static u32    sram_hash;
 static int opt_frameskip = 1; /* 0 = off, 1 = auto (skip drawing a frame core 2 can't finish in time) */
 static int opt_slot;          /* save-state slot 0..9 */
 static int opt_smooth = 1;    /* scaling (GPU display): 0 Sharp, 1 Crisp, 2 Smooth */
+static int opt_crt;           /* screen effect (GPU display): 0 Off, 1 Scanlines, 2 LCD grid */
 static int opt_audio_stretch = 1; /* slow the sound down instead of crackling */
 static int opt_gapfill = 1;   /* 3D: fill seams between layers */
 static int opt_lowprio;       /* core-2 render thread below system services (slower: off) */
@@ -294,6 +296,8 @@ static void config_load(void)
          opt_slot = atoi(eq) >= 0 && atoi(eq) <= 9 ? atoi(eq) : 0;
       else if (!strcmp(line, "scaling"))
          opt_smooth = clampi(atoi(eq), 0, 2);
+      else if (!strcmp(line, "screen_effect"))
+         opt_crt = clampi(atoi(eq), 0, 2);
       else if (!strcmp(line, "audio_stretch"))
          opt_audio_stretch = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "3d_gap_fill"))
@@ -327,9 +331,9 @@ static void config_save(void)
    if (!f)
       return;
    fprintf(f, "last_dir=%s\nframe_skip=%d\nprofiler=%d\ncolor_style=%d\ncore2=%d\ndisplay=%d\ngpu=%d\n"
-         "slot=%d\nscaling=%d\naudio_stretch=%d\ncore2_low_prio=%d\nsaturation=%d\nbrightness=%d\n3d_gap_fill=%d\n",
+         "slot=%d\nscaling=%d\naudio_stretch=%d\ncore2_low_prio=%d\nsaturation=%d\nbrightness=%d\n3d_gap_fill=%d\nscreen_effect=%d\n",
          cur_dir, opt_frameskip, opt_profiler, opt_colorcorr, opt_core2, opt_display, opt_gpu,
-         opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill);
+         opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill, opt_crt);
    /* the all-games 3D settings (a game with its own profile keeps them aside) */
    d3_write(f, d3_pergame ? &d3_global : &d3);
    fclose(f);
@@ -617,6 +621,31 @@ static int opt_smooth_fwd(void);
  * filtering. Every GBA pixel comes out the same size with only a hairline
  * of blending at its edges (plain nearest scaling to 1.5x makes some pixels
  * one screen pixel wide and others two). */
+/* Screen effects: an 8x8 alpha pattern repeated once per GBA pixel and
+ * drawn in black over the picture (rows: scanlines, rows + columns: LCD
+ * grid). Texels are stored in the GPU's tiled (Morton) order. */
+static C3D_Tex           gpu_fx_tex[2];
+static bool              gpu_fx_ok;
+static void gpu_fx_fill(C3D_Tex *t, bool cols)
+{
+   u8 *d = (u8*)t->data;
+   int x, y;
+   for (y = 0; y < 8; y++)
+      for (x = 0; x < 8; x++)
+      {
+         int m = 0, b;
+         int a = 0;
+         for (b = 0; b < 3; b++)
+            m |= ((x >> b) & 1) << (2 * b) | ((y >> b) & 1) << (2 * b + 1);
+         if (y >= 6)
+            a = cols ? 0x70 : 0x78;   /* gap between rows */
+         if (cols && x >= 7)
+            a = a ? 0x90 : 0x60;      /* gap between columns */
+         d[m] = (u8)a;
+      }
+   C3D_TexFlush(t);
+}
+
 static C3D_Tex           gpu_up_tex[2];
 static C3D_RenderTarget *gpu_up[2];
 static bool              gpu_up_ok;
@@ -670,6 +699,18 @@ static bool gpu_init(void)
          gpu_up_ok = false;
       C3D_TexSetFilter(&gpu_up_tex[e], GPU_LINEAR, GPU_LINEAR);
       C3D_TexSetWrap(&gpu_up_tex[e], GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+   }
+   gpu_fx_ok = true;
+   for (e = 0; e < 2; e++)
+   {
+      if (!C3D_TexInit(&gpu_fx_tex[e], 8, 8, GPU_A8))
+      {
+         gpu_fx_ok = false;
+         break;
+      }
+      C3D_TexSetFilter(&gpu_fx_tex[e], GPU_LINEAR, GPU_LINEAR);
+      C3D_TexSetWrap(&gpu_fx_tex[e], GPU_REPEAT, GPU_REPEAT);
+      gpu_fx_fill(&gpu_fx_tex[e], e == 1);
    }
    if (!ctrInitGpu())
       return false;
@@ -851,12 +892,21 @@ static void gpu_submit(void)
          ctrActivateTexture(&gpu_up_tex[e]);
          ctrAddRectEx(0xFFFFFFFF, r[0], r[1], r[2], r[3], 0, 0, GBA_W * UP_MULT, GBA_H * UP_MULT, 0);
          ctrFlushBatch();
-         continue;
       }
-      ctrSetViewportSize(TOP_W, TOP_H, true);
-      ctrActivateTexture(&gpu_tex[e < uploads ? e : 0]);
-      ctrAddRectEx(0xFFFFFFFF, r[0], r[1], r[2], r[3], 0, 0, GBA_W, GBA_H, 0);
-      ctrFlushBatch();
+      else
+      {
+         ctrSetViewportSize(TOP_W, TOP_H, true);
+         ctrActivateTexture(&gpu_tex[e < uploads ? e : 0]);
+         ctrAddRectEx(0xFFFFFFFF, r[0], r[1], r[2], r[3], 0, 0, GBA_W, GBA_H, 0);
+         ctrFlushBatch();
+      }
+      if (opt_crt && gpu_fx_ok)
+      {
+         /* black, with the pattern's alpha: 8 texels per GBA pixel */
+         ctrActivateTexture(&gpu_fx_tex[opt_crt - 1]);
+         ctrAddRectEx(0xFF000000, r[0], r[1], r[2], r[3], 0, 0, GBA_W * 8, GBA_H * 8, 0);
+         ctrFlushBatch();
+      }
    }
    ctrEndFrame();
    gpu_guard_step("sending the frame");
@@ -1934,7 +1984,7 @@ enum {
    /* Game */
    M_RESUME, M_SLOT, M_SAVE, M_LOAD, M_RESET, M_LIST, M_QUIT,
    /* Display */
-   M_SIZE, M_SMOOTH, M_CSTYLE, M_SAT, M_BRIGHT, M_COLRESET,
+   M_SIZE, M_SMOOTH, M_CRT, M_CSTYLE, M_SAT, M_BRIGHT, M_COLRESET,
    /* 3D */
    M_3D, M_3DPCT, M_3DMETHOD, M_3DSMART, M_3DSTYLE, M_L0, M_L1, M_L2, M_L3, M_SPRITE, M_FOCUS, M_TILT, M_GAPFILL, M_PERGAME, M_3DRESET,
    /* Speed */
@@ -2024,6 +2074,13 @@ static void menu_build(int tab)
                   opt_smooth == 0 ? "Sharp: hard pixels; at Fit/Stretch some\nare wider than others." :
                   opt_smooth == 1 ? "Crisp: even, sharp pixels with clean\nedges (best for Fit / Stretch)." :
                                     "Smooth: soft, blended pixels.");
+         }
+         {
+            static const char *const fx[] = { "Off", "Scanlines", "LCD grid" };
+            mrow_choice(M_CRT, "Screen effect", fx[opt_crt],
+                  opt_crt == 1 ? "Scanlines: dark lines between the rows,\nlike a CRT TV. Best at Fit / Stretch." :
+                  opt_crt == 2 ? "LCD grid: thin gaps around every pixel,\nlike the GBA screen. Best at Fit / Stretch." :
+                                 "No effect. (Needs GPU display.)");
          }
          mrow_choice(M_CSTYLE, "Color style", cc_names[opt_colorcorr], "Original: colours as the game made them.\nGBA soft / GBA screen: like the old GBA LCD.");
          mrow_slider(M_SAT, "Saturation", opt_sat, 50, 150, "%d%%", "More or less colourful.\n100% = as the game drew it.");
@@ -2135,6 +2192,7 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
    {
       case M_SLOT:     CYCLEV(opt_slot, 10); make_state_path(); break;
       case M_SIZE:     CYCLEV(opt_display, 3); preview_later(false); break;
+      case M_CRT:      CYCLEV(opt_crt, 3); preview_later(false); break;
       case M_SMOOTH:   CYCLEV(opt_smooth, 3); gpu_apply_filter(); preview_later(false);
                        if (!GPU_ACTIVE) return "Scaling needs System > GPU display On";
                        if (opt_display == 0) return "Original size is always 1:1 sharp";
@@ -2795,8 +2853,23 @@ static bool direct_launch, direct_pending;
 static void direct_launch_init(int argc, char **argv)
 {
    const char *a = argc > 1 && argv ? argv[1] : NULL;
+   static char from_file[512];
    if (!a || !*a)
-      return;
+   {
+      /* HOME Menu forwarders (made by make-forwarders.sh) leave the game's
+       * path here and then start gpSP 3D */
+      FILE *f = fopen(LAUNCH_PATH, "r");
+      if (!f)
+         return;
+      from_file[0] = 0;
+      if (fgets(from_file, sizeof(from_file), f))
+         from_file[strcspn(from_file, "\r\n")] = 0;
+      fclose(f);
+      remove(LAUNCH_PATH);   /* one launch per request */
+      a = from_file;
+      if (!*a)
+         return;
+   }
    if (a[0] == '/')
       snprintf(rom_path, sizeof(rom_path), "sdmc:%s", a);
    else
