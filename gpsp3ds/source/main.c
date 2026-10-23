@@ -2608,9 +2608,13 @@ static bool frame_skip_plan(void)
    }
    if (skip_phase == 0)
    {
-      /* draw this one; skip 1 (or 2 if core 2 needs over two frames' time) */
+      /* draw this one, then skip as many frames as core 2 needs to finish
+       * it (heavy 3D screens can take 50-90 ms on an Old 3DS): the game
+       * never waits for core 2, so it and the sound stay at full speed */
       u32 c2 = video_thread_last_render_us() + video_thread_last_hook_us();
-      skip_count = c2 > 29000 ? 2 : 1;
+      skip_count = (int)((c2 + 14999) / 15000) - 1;
+      if (skip_count < 1) skip_count = 1;
+      if (skip_count > 5) skip_count = 5;
       video_thread_defer_next_finish();
       skip_phase = skip_count;
       return true;
