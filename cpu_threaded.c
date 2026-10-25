@@ -2505,6 +2505,9 @@ static u32 iwram_page_lo[IWRAM_PAGES], ewram_page_lo[EWRAM_PAGES];
 static u32 iwram_page_hi[IWRAM_PAGES], ewram_page_hi[EWRAM_PAGES];
 static u32 iwram_smc_pending, ewram_smc_pending[EWRAM_PAGES / 32];
 static bool smc_pending;
+/* tags of dropped blocks, used again for new ones (there are only ~16K) */
+static u16 free_tags[0x4000];
+static u32 free_tag_n;
 
 static void ram_pages_reset(void)
 {
@@ -2515,6 +2518,7 @@ static void ram_pages_reset(void)
   iwram_smc_pending = 0;
   memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
   smc_pending = false;
+  free_tag_n = 0;
 }
 
 /* a RAM block was scanned: [start, end) are its instructions */
@@ -2578,16 +2582,14 @@ void smc_note_write(u32 address)
 #define RAM_TAG_LOW        0x8010
 
 #define allocate_tag_arm(location) {   \
-  location[0] = ram_block_tag;         \
+  location[0] = new_ram_tag();         \
   /* Could be another thumb inst */    \
   if (!location[1])                    \
     location[1] = CODE_TAG_BLOCK16;    \
-  ram_block_tag -= 2;                  \
 }
 
 #define allocate_tag_thumb(location) { \
-  location[0] = ram_block_tag;         \
-  ram_block_tag -= 2;                  \
+  location[0] = new_ram_tag();         \
 }
 
 typedef struct
@@ -2597,6 +2599,22 @@ typedef struct
 } ramtag_type;
 
 static u32 ram_block_tag = INITIAL_TOP_TAG;
+
+static u16 new_ram_tag(void)
+{
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+  if (free_tag_n)
+    return free_tags[--free_tag_n];
+#endif
+  ram_block_tag -= 2;
+  return (u16)(ram_block_tag + 2);
+}
+
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+#define ram_tags_left() (free_tag_n || ram_block_tag >= RAM_TAG_LOW)
+#else
+#define ram_tags_left() (ram_block_tag >= RAM_TAG_LOW)
+#endif
 
 inline static ramtag_type* get_ram_tag(u16 tagval) {
   ramtag_type *tbl = (ramtag_type*)&ram_translation_cache[RAM_TRANSLATION_CACHE_SIZE];
@@ -2749,7 +2767,7 @@ u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
       ramtag_type* trentry;                                                   \
       /* Allocate a tag if not a valid one, and initialize header */          \
       if (!VALID_TAG(*tagp)) {                                                \
-        if (ram_block_tag < RAM_TAG_LOW) {                                    \
+        if (!ram_tags_left()) {                                               \
           /* out of tags: start over (the lookup is retried) */               \
           flush_translation_cache_ram_full();                                 \
           return NULL;                                                        \
@@ -3583,6 +3601,13 @@ static void ram_page_drop(u8 *smc, u32 *lo, u32 *hi, u32 size, u32 p)
       end = size;
   }
   start &= ~3U;
+  {
+    const u16 *t = (const u16*)(smc + start);
+    u32 i, n = (end - start) / 2;
+    for (i = 0; i < n; i++)
+      if (VALID_TAG(t[i]) && free_tag_n < sizeof(free_tags) / sizeof(free_tags[0]))
+        free_tags[free_tag_n++] = t[i];
+  }
   memset(smc + start, 0, end - start);
   for (q = start >> RAM_PAGE_SHIFT; q <= (end - 1) >> RAM_PAGE_SHIFT; q++)
   {

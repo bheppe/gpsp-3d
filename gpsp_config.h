@@ -15,6 +15,12 @@
 #if defined(SMALL_TRANSLATION_CACHE)
   #define ROM_TRANSLATION_CACHE_SIZE (1024 * 1024 * 2)
   #define RAM_TRANSLATION_CACHE_SIZE (1024 * 384)
+#elif defined(_3DS)
+  /* The same 10.5 MB in all, with more for RAM code: games that rewrite
+   * their RAM code (Mario Golf: Advance Tour) keep translating it again,
+   * and old translations are only reclaimed by a full flush. */
+  #define ROM_TRANSLATION_CACHE_SIZE (1024 * 1024 * 8)
+  #define RAM_TRANSLATION_CACHE_SIZE (1024 * 1024 * 5 / 2)
 #else
   #define ROM_TRANSLATION_CACHE_SIZE (1024 * 1024 * 10)
   #define RAM_TRANSLATION_CACHE_SIZE (1024 * 512)
