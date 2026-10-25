@@ -5,7 +5,7 @@
 
 #include "ui.h"
 
-#define GPSP3D_VERSION "0.1.1"
+#define GPSP3D_VERSION "0.1.2"
 
 enum { ROW_HEADER, ROW_ACTION, ROW_CHOICE, ROW_TOGGLE, ROW_SLIDER, ROW_INFO };
 

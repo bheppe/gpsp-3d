@@ -184,6 +184,11 @@ static bool d3_pergame;        /* the loaded game has its own 3D profile */
 static int opt_gpu = 1;     /* show frames with the GPU (needs core 2) */
 static int opt_gpu_test;    /* diagnostics: 0 Full, 1 No draw, 2 No upload */
 static bool stereo_mode;    /* top screen currently in 3D mode */
+static bool wide_mode;      /* top screen in its 800px mode (2D at Fit / Stretch) */
+static bool wide_allowed = true;   /* false on Old 2DS, which has no 800px mode */
+static bool slider_flat;    /* 3D slider all the way down: show 2D */
+/* bytes of one top-screen framebuffer (twice as many columns in 800px mode) */
+#define TOP_FB_BYTES ((wide_mode ? 2u : 1u) * TOP_W * TOP_H * 2)
 
 static bool vars_changed = true;
 
@@ -440,12 +445,12 @@ static void clear_top(void)
    for (i = 0; i < 2; i++)
    {
       u8 *fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
-      memset(fb, 0, TOP_W * TOP_H * 2);
+      memset(fb, 0, TOP_FB_BYTES);
       if (stereo_mode)
-         memset(gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), 0, TOP_W * TOP_H * 2);
-      flush_gpu(fb, TOP_W * TOP_H * 2);
+         memset(gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), 0, TOP_FB_BYTES);
+      flush_gpu(fb, TOP_FB_BYTES);
       if (stereo_mode)
-         flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), TOP_W * TOP_H * 2);
+         flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), TOP_FB_BYTES);
       gfxScreenSwapBuffers(GFX_TOP, stereo_mode);
       gspWaitForVBlank();
    }
@@ -543,21 +548,22 @@ static void blit_to_top(const u16 *src, unsigned pitch, gfx3dSide_t side)
    const u16 *lut = video_thread_enabled ? NULL : cc_table();   /* core 2 corrects the palette */
    const bool cc = lut != NULL;
    const bool scaled = opt_display != 0;
-   const unsigned W  = opt_display == 0 ? GBA_W : opt_display == 1 ? 360 : 400;
-   const unsigned x0 = (TOP_W - W) / 2;
-   unsigned xs, k, y;
+   /* in 800px mode every column is half as wide: twice as many of them
+    * (Fit: exactly 3 per GBA pixel) */
+   const unsigned FW = wide_mode ? TOP_W * 2 : TOP_W;
+   const unsigned W  = (opt_display == 0 ? GBA_W : opt_display == 1 ? 360 : 400) * (wide_mode ? 2 : 1);
+   const unsigned x0 = (FW - W) / 2;
+   unsigned xs, k, y, j;
 
    for (xs = 0; xs < GBA_W; xs += STRIP)
    {
-      u16 *col[STRIP], *col2[STRIP];   /* write pointers (col2: repeated column or NULL) */
+      u16 *col[STRIP];      /* write pointer of each GBA column's first screen column */
+      u8   reps[STRIP];     /* screen columns per GBA column (1 to 4) */
       for (k = 0; k < STRIP; k++)
       {
-         unsigned x = xs + k, c0, c1;
-         if (opt_display == 0)      { c0 = x;             c1 = x + 1; }
-         else if (opt_display == 1) { c0 = (3 * x) / 2;   c1 = (3 * (x + 1)) / 2; }
-         else                       { c0 = (5 * x) / 3;   c1 = (5 * (x + 1)) / 3; }
+         unsigned x = xs + k, c0 = W * x / GBA_W, c1 = W * (x + 1) / GBA_W;
          col[k]  = fb + (x0 + c0) * TOP_H + (scaled ? TOP_H - 1 : TOP_H - 1 - TOP_Y0);
-         col2[k] = (c1 - c0 == 2) ? col[k] + TOP_H : NULL;
+         reps[k] = (u8)(c1 - c0);
       }
 
       if (!scaled)
@@ -584,16 +590,13 @@ static void blit_to_top(const u16 *src, unsigned pitch, gfx3dSide_t side)
             u16 a = s0[k], b = s1[k];
             u16 *d = col[k];
             if (cc) { a = cc_px(lut, a); b = cc_px(lut, b); }
-            d[0] = a;          /* even GBA row: one screen row  */
-            d[-1] = b;         /* odd GBA row: two screen rows  */
-            d[-2] = b;
-            col[k] = d - 3;
-            if (col2[k])
+            for (j = 0; j < reps[k]; j++, d += TOP_H)
             {
-               u16 *e = col2[k];
-               e[0] = a; e[-1] = b; e[-2] = b;
-               col2[k] = e - 3;
+               d[0] = a;       /* even GBA row: one screen row  */
+               d[-1] = b;      /* odd GBA row: two screen rows  */
+               d[-2] = b;
             }
+            col[k] -= 3;
          }
       }
    }
@@ -650,6 +653,19 @@ static C3D_Tex           gpu_up_tex[2];
 static C3D_RenderTarget *gpu_up[2];
 static bool              gpu_up_ok;
 #define UP_MULT 2
+
+/* 800px mode (2D): its own 800-wide screen target, and for Sharp a buffer
+ * 3x as wide as the GBA screen (720 = Fit exactly: hard columns, no
+ * blending across; rows are 2x, then 1.5x like Crisp). Made when first
+ * needed. The buffer is square, like the 2x one, so the viewport (which
+ * ctrSetViewportSize gives with width and height swapped) fits either way. */
+static C3D_RenderTarget *gpu_wide;
+static C3D_Tex           gpu_wup_tex;
+static C3D_RenderTarget *gpu_wup;
+static bool              gpu_wup_ok;
+static bool              gpu_linked_wide;   /* gpu_wide is the top screen's output */
+static bool              gpu_wide_failed;   /* no VRAM for it: 800px mode on the CPU path only */
+#define WUP_MULT_X 3
 
 static void gpu_apply_filter(void)
 {
@@ -810,6 +826,55 @@ static void gpu_frame_end(void)
       C3D_FrameEnd(0);
 }
 
+/* the GPU side of the 800px mode; call with the GPU idle */
+static bool gpu_wide_init(void)
+{
+   if (gpu_wide)
+      return true;
+   if (gpu_wide_failed)
+      return false;
+   gpu_wide = C3D_RenderTargetCreate(240, TOP_W * 2, GPU_RB_RGBA8, -1);
+   if (!gpu_wide)
+   {
+      gpu_wide_failed = true;
+      return false;
+   }
+   if (C3D_TexInitVRAM(&gpu_wup_tex, 1024, 1024, GPU_RGB565))
+   {
+      gpu_wup = C3D_RenderTargetCreateFromTex(&gpu_wup_tex, GPU_TEXFACE_2D, 0, -1);
+      gpu_wup_ok = gpu_wup != NULL;
+      C3D_TexSetFilter(&gpu_wup_tex, GPU_LINEAR, GPU_LINEAR);
+      C3D_TexSetWrap(&gpu_wup_tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+      if (gpu_wup_ok)
+      {
+         C3D_FrameBegin(0);
+         C3D_FrameDrawOn(gpu_wup);
+         C3D_RenderTargetClear(gpu_wup, C3D_CLEAR_COLOR, 0, 0);
+         C3D_FrameEnd(0);
+      }
+   }
+   return true;
+}
+
+/* which render target(s) the GPU sends to the top screen: one 800px wide,
+ * or one per eye (400px); call with the GPU idle */
+static void gpu_link(bool wide)
+{
+   if (wide == gpu_linked_wide)
+      return;
+   if (wide)
+   {
+      C3D_RenderTargetSetOutput(NULL, GFX_TOP, GFX_RIGHT, 0);
+      C3D_RenderTargetSetOutput(gpu_wide, GFX_TOP, GFX_LEFT, FB_FLAGS);
+   }
+   else
+   {
+      C3D_RenderTargetSetOutput(gpu_top[0], GFX_TOP, GFX_LEFT, FB_FLAGS);
+      C3D_RenderTargetSetOutput(gpu_top[1], GFX_TOP, GFX_RIGHT, FB_FLAGS);
+   }
+   gpu_linked_wide = wide;
+}
+
 static void gpu_clear(void)
 {
    int e;
@@ -817,6 +882,12 @@ static void gpu_clear(void)
    if (!gpu_frame_begin())
       return;
    ctrStartFrame();
+   if (gpu_linked_wide)
+   {
+      C3D_FrameDrawOn(gpu_wide);
+      C3D_RenderTargetClear(gpu_wide, C3D_CLEAR_COLOR, 0, 0);
+   }
+   else
    for (e = 0; e < (stereo_mode ? 2 : 1); e++)
    {
       C3D_FrameDrawOn(gpu_top[e]);
@@ -849,9 +920,19 @@ static void gpu_stage_frame(const u16 *left, const u16 *right, unsigned pitch)
 static void gpu_submit(void)
 {
    static const s16 rect[3][4] = { { 80, 40, 240, 160 }, { 20, 0, 360, 240 }, { 0, 0, 400, 240 } };
-   const s16 *r = rect[opt_display];
-   int uploads = gpu_staged_uploads, eyes = stereo_mode ? 2 : 1, e;
-   bool crisp = gpu_up_ok && opt_smooth == 1 && opt_display != 0;
+   static const s16 rect_wide[3][4] = { { 160, 40, 480, 160 }, { 40, 0, 720, 240 }, { 0, 0, 800, 240 } };
+   const bool wide = gpu_linked_wide;
+   const s16 *r = wide ? rect_wide[opt_display] : rect[opt_display];
+   const s16 screen_w = wide ? TOP_W * 2 : TOP_W;
+   int uploads = gpu_staged_uploads, eyes = (stereo_mode && !wide) ? 2 : 1, e;
+   /* Sharp and Crisp at Fit / Stretch: enlarge with hard pixels to a whole
+    * multiple first, then scale that to the screen with linear filtering,
+    * so every GBA pixel comes out the same size (plain nearest scaling to
+    * 1.5x makes some one screen pixel wide and others two, which breaks
+    * up dithered transparency). In 800px mode Sharp enlarges 3x across:
+    * at Fit that is the screen's own width, so the columns stay hard. */
+   bool crisp = gpu_up_ok && opt_smooth != 2 && opt_display != 0;
+   bool sharp3 = crisp && wide && opt_smooth == 0 && gpu_wup_ok;
 
    if (gpu_guarded && ++gpu_guard_frames == 180)
       gpu_guard_clear();   /* 3 seconds of GPU frames: it works */
@@ -874,11 +955,27 @@ static void gpu_submit(void)
    gpu_guard_step("drawing");
    for (e = 0; e < eyes; e++)
    {
-      C3D_FrameDrawOn(gpu_top[e]);
-      C3D_RenderTargetClear(gpu_top[e], C3D_CLEAR_COLOR, 0, 0);   /* colour only: there is no depth buffer */
+      C3D_RenderTarget *screen = wide ? gpu_wide : gpu_top[e];
+      C3D_FrameDrawOn(screen);
+      C3D_RenderTargetClear(screen, C3D_CLEAR_COLOR, 0, 0);   /* colour only: there is no depth buffer */
       if (opt_gpu_test == 1)
          continue;
-      if (crisp)
+      if (sharp3)
+      {
+         /* 1: frame -> 3x across, 2x down, hard pixels */
+         C3D_FrameDrawOn(gpu_wup);
+         ctrSetViewportSize(1024, 1024, false);
+         ctrActivateTexture(&gpu_tex[0]);
+         ctrAddRectEx(0xFFFFFFFF, 0, 0, GBA_W * WUP_MULT_X, GBA_H * UP_MULT, 0, 0, GBA_W, GBA_H, 0);
+         ctrFlushBatch();
+         /* 2: -> screen, linear (at Fit: 1:1 across, 1.5x down) */
+         C3D_FrameDrawOn(screen);
+         ctrSetViewportSize(screen_w, TOP_H, true);
+         ctrActivateTexture(&gpu_wup_tex);
+         ctrAddRectEx(0xFFFFFFFF, r[0], r[1], r[2], r[3], 0, 0, GBA_W * WUP_MULT_X, GBA_H * UP_MULT, 0);
+         ctrFlushBatch();
+      }
+      else if (crisp)
       {
          /* 1: frame -> 2x buffer, hard pixels */
          C3D_FrameDrawOn(gpu_up[e]);
@@ -887,15 +984,15 @@ static void gpu_submit(void)
          ctrAddRectEx(0xFFFFFFFF, 0, 0, GBA_W * UP_MULT, GBA_H * UP_MULT, 0, 0, GBA_W, GBA_H, 0);
          ctrFlushBatch();
          /* 2: 2x buffer -> screen, linear */
-         C3D_FrameDrawOn(gpu_top[e]);
-         ctrSetViewportSize(TOP_W, TOP_H, true);
+         C3D_FrameDrawOn(screen);
+         ctrSetViewportSize(screen_w, TOP_H, true);
          ctrActivateTexture(&gpu_up_tex[e]);
          ctrAddRectEx(0xFFFFFFFF, r[0], r[1], r[2], r[3], 0, 0, GBA_W * UP_MULT, GBA_H * UP_MULT, 0);
          ctrFlushBatch();
       }
       else
       {
-         ctrSetViewportSize(TOP_W, TOP_H, true);
+         ctrSetViewportSize(screen_w, TOP_H, true);
          ctrActivateTexture(&gpu_tex[e < uploads ? e : 0]);
          ctrAddRectEx(0xFFFFFFFF, r[0], r[1], r[2], r[3], 0, 0, GBA_W, GBA_H, 0);
          ctrFlushBatch();
@@ -1016,10 +1113,10 @@ static void frame_hook(const unsigned short *left, const unsigned short *right, 
    if (fast_flush)
    {
       svcFlushProcessDataCache(CUR_PROCESS_HANDLE,
-            (u32)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL), TOP_W * TOP_H * 2);
+            (u32)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL), TOP_FB_BYTES);
       if (stereo_mode)
          svcFlushProcessDataCache(CUR_PROCESS_HANDLE,
-               (u32)gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), TOP_W * TOP_H * 2);
+               (u32)gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), TOP_FB_BYTES);
    }
    hook_flush_us = (u32)((svcGetSystemTick() - t1) / (SYSCLOCK_ARM11 / 1000000));
    hook_blitted = true;
@@ -1027,19 +1124,70 @@ static void frame_hook(const unsigned short *left, const unsigned short *right, 
 
 /* Puts the top screen in or out of 3D mode to match the settings. 3D needs
  * the renderer on core 2 (each line is drawn once per eye there). */
+/* 3D slider all the way down = 2D (a little hysteresis so it can't flap) */
+static void slider_flat_update(void)
+{
+   float sl = osGet3DSliderState();
+   if (slider_flat && sl > 0.02f)
+      slider_flat = false;
+   else if (!slider_flat && sl < 0.005f)
+      slider_flat = true;
+}
+
+/* the top screen mode the settings and the 3D slider ask for */
+static void mode_wanted(bool *want3d, bool *wide)
+{
+   slider_flat_update();
+   *want3d = d3.on && video_thread_enabled && !slider_flat;
+   /* 2D at Fit / Stretch: the 800px mode, for exact 3x columns at Fit */
+   *wide = !*want3d && wide_allowed && opt_display != 0;
+}
+
 static void stereo_apply(void)
 {
-   bool want;
+   bool want, wide;
    if (video_thread_enabled)
       video_thread_set_color_correction(cc_table());
-   want = d3.on && video_thread_enabled;
-   if (want != stereo_mode)
+   mode_wanted(&want, &wide);
+   if (wide && GPU_ACTIVE)
    {
+      present_idle();
+      if (!gpu_wide_init())
+         wide = false;
+   }
+   if (want != stereo_mode || wide != wide_mode)
+   {
+      present_idle();
       stereo_mode = want;
-      gfxSet3D(want);
+      wide_mode = wide;
+      if (want)
+         gfxSet3D(true);
+      else
+         gfxSetWide(wide);   /* false: plain 2D */
+   }
+   if (gpu_ok && gpu_linked_wide != (wide_mode && GPU_ACTIVE))
+   {
+      present_idle();
+      gpu_unstick(SYSCLOCK_ARM11 / 10);
+      gpu_link(wide_mode && GPU_ACTIVE);
    }
    if (!want && video_thread_enabled)
       video_thread_set_stereo(NULL);
+}
+
+/* during play: the 3D slider went to or left the bottom (or the settings
+ * changed): switch the top screen between 3D and 2D/800px. Only call when
+ * core 2 is not drawing. Returns true if it switched. */
+static bool stereo_mode_check(void)
+{
+   bool want, wide;
+   mode_wanted(&want, &wide);
+   if (wide && GPU_ACTIVE && gpu_wide_failed)
+      wide = false;
+   if (want == stereo_mode && wide == wide_mode)
+      return false;
+   stereo_apply();
+   return true;
 }
 
 /* current overall 3D amount in % (settings strength x 3D slider) */
@@ -1396,6 +1544,11 @@ static void sram_flush(bool force)
    }
 }
 
+/* Whether each state slot has a file: 0 unknown, 1 used, 2 empty. Looking
+ * on the SD card takes milliseconds (more in a big saves folder), and the
+ * menu asks every frame, so the answer is kept until the game changes. */
+static u8 state_known[10];
+
 static bool state_save(void)
 {
    FILE *f;
@@ -1406,6 +1559,8 @@ static bool state_save(void)
       return false;
    fwrite(state_buf, 1, state_size, f);
    fclose(f);
+   if (opt_slot >= 0 && opt_slot < 10)
+      state_known[opt_slot] = 1;
    return true;
 }
 
@@ -1428,18 +1583,15 @@ static void apt_hook(APT_HookType hook, void *param)
 {
    (void)param;
    if (hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONSLEEP || hook == APTHOOK_ONEXIT)
-   {
       sram_flush(false);
-      /* Give core 2 back to the system while we're in the background: with
-       * 80% reserved for us, the HOME menu (which runs on that core) crawls. */
-      if (video_thread_enabled)
-         APT_SetAppCpuTimeLimit(30);
-   }
-   else if (hook == APTHOOK_ONRESTORE || hook == APTHOOK_ONWAKEUP)
-   {
-      if (video_thread_enabled)
-         APT_SetAppCpuTimeLimit(80);
-   }
+   /* Give core 2 back to the system while we're in the background: with
+    * 80% reserved for us, the HOME menu (which runs on that core) crawls.
+    * Not for sleep: nothing runs then, and this is a call to the system's
+    * APT service in the middle of its sleep handshake. */
+   if (hook == APTHOOK_ONSUSPEND && video_thread_enabled)
+      APT_SetAppCpuTimeLimit(30);
+   else if (hook == APTHOOK_ONRESTORE && video_thread_enabled)
+      APT_SetAppCpuTimeLimit(80);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1564,20 +1716,25 @@ static bool browse(void)
 {
    int sel = 0, top = 0;
    bool redraw = true, touch_down = false;
-   int touch_y0 = 0, touch_idx = -1, moved = 0;
+   int touch_y0 = 0, touch_idx = -1, moved = 0, hold_frames = 0;
 
    scan_dir();
    while (aptMainLoop())
    {
       u32 down, held;
+      int step;
       hidScanInput();
       down = hidKeysDown() | (hidKeysDownRepeat() & (KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT));
       held = hidKeysHeld();
+      /* holding Up / Down scrolls faster and faster: 1 row per repeat,
+       * then 2 after 1 second, 4 after 2 seconds (long game lists) */
+      hold_frames = (held & (KEY_UP | KEY_DOWN)) ? hold_frames + 1 : 0;
+      step = (hidKeysDown() & (KEY_UP | KEY_DOWN)) ? 1 : hold_frames > 120 ? 4 : hold_frames > 60 ? 2 : 1;
 
       if (down & KEY_START)
          return false;
-      if (down & KEY_DOWN)  { sel++; redraw = true; }
-      if (down & KEY_UP)    { sel--; redraw = true; }
+      if (down & KEY_DOWN)  { sel += step; redraw = true; }
+      if (down & KEY_UP)    { sel -= step; redraw = true; }
       if (down & KEY_RIGHT) { sel += LIST_ROWS; redraw = true; }
       if (down & KEY_LEFT)  { sel -= LIST_ROWS; redraw = true; }
 
@@ -1667,8 +1824,14 @@ static void make_state_path(void) { state_path_for(opt_slot, state_path, sizeof(
 static bool state_exists(int slot)
 {
    char p[600];
+   bool used;
+   if (slot >= 0 && slot < 10 && state_known[slot])
+      return state_known[slot] == 1;
    state_path_for(slot, p, sizeof(p));
-   return file_exists(p);
+   used = file_exists(p);
+   if (slot >= 0 && slot < 10)
+      state_known[slot] = used ? 1 : 2;
+   return used;
 }
 
 static void profile_load_fwd(void);
@@ -1699,6 +1862,7 @@ static void make_paths(void)
       snprintf(save_dir, sizeof(save_dir), "%.*s", (int)(dl ? dl - 1 : 0), rom_path);
 
    snprintf(save_path, sizeof(save_path), "%s/%s.srm", save_dir, rom_name);
+   memset(state_known, 0, sizeof(state_known));
    make_state_path();
 }
 
@@ -1952,10 +2116,11 @@ static void ui_wait_message(const char *title, const char *body)
  * size settings, so changes in the menu can be seen right away. */
 static void preview_refresh(void)
 {
+   /* mode first (3D / 2D / 800px), then clear in that mode's layout */
+   stereo_apply();
    clear_top();
    if (!video_thread_enabled || !game_loaded)
       return;
-   stereo_apply();
    stereo_update();
    if (!video_thread_redraw())
       return;
@@ -1968,9 +2133,9 @@ static void preview_refresh(void)
    else if (hook_blitted)
    {
       hook_blitted = false;
-      flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL), TOP_W * TOP_H * 2);
+      flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL), TOP_FB_BYTES);
       if (stereo_mode)
-         flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), TOP_W * TOP_H * 2);
+         flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), TOP_FB_BYTES);
       gfxScreenSwapBuffers(GFX_TOP, stereo_mode);
    }
 }
@@ -2071,8 +2236,8 @@ static void menu_build(int tab)
          {
             static const char *const sc[] = { "Sharp", "Crisp", "Smooth" };
             mrow_choice(M_SMOOTH, "Scaling", sc[opt_smooth],
-                  opt_smooth == 0 ? "Sharp: hard pixels; at Fit/Stretch some\nare wider than others." :
-                  opt_smooth == 1 ? "Crisp: even, sharp pixels with clean\nedges (best for Fit / Stretch)." :
+                  opt_smooth == 0 ? "Sharp: hard, even pixels. In 2D at Fit\nthe columns are exact (800px mode)." :
+                  opt_smooth == 1 ? "Crisp: even pixels with slightly soft\nedges (best for Fit / Stretch)." :
                                     "Smooth: soft, blended pixels.");
          }
          {
@@ -2138,7 +2303,7 @@ static void menu_build(int tab)
          mrow_choice(M_PRIO, "Core 2 priority", opt_lowprio ? "Low" : "High", "High (recommended): drawing first.\nLow: system services on core 2 first.");
          mrow_add(M_C2TEST, ROW_ACTION, "Core 2 speed test", "Measures how much of core 2 this app\ngets (takes 3 seconds).");
          mrows[mrow_n - 1].r.value = core2_result[0] ? core2_result : NULL;
-         snprintf(about, sizeof(about), "gpSP 3D 0.4");
+         snprintf(about, sizeof(about), "gpSP 3D " GPSP3D_VERSION);
          mrow_add(M_ABOUT, ROW_INFO, "Version", "gpSP (libretro, GPL-2), mGBA 3DS GPU\ncode (MPL-2.0), Inter font (OFL).");
          mrows[mrow_n - 1].r.value = about;
          break;
@@ -2519,8 +2684,8 @@ static bool game_menu(void)
             snprintf(note, sizeof(note), "%s", msg);
             note_ok = 0;
          }
-         if (d3_pergame && act_id >= M_3D && act_id <= M_3DRESET)
-            profile_save();
+         /* (the game's 3D profile is written once, when the menu closes:
+          * a file write per press made the menu stutter) */
          redraw = true;
       }
 
@@ -2530,7 +2695,7 @@ static bool game_menu(void)
          if (fabsf(sl - last_slider) > 0.03f)
          {
             last_slider = sl;
-            if (tab == 2 || stereo_mode)
+            if (tab == 2 || d3.on)
                preview_later(false);
          }
       }
@@ -2748,7 +2913,11 @@ static void run_game(void)
       frame_ready = false;
       /* not while core 2 may still be drawing a deferred frame */
       if (!(skip_heavy && skip_phase > 0))
+      {
+         if (stereo_mode_check())
+            clear_top();   /* the other mode's framebuffer layout: start clean */
          stereo_update();
+      }
       drawn = frame_skip_plan();
       retro_run();
       if (skip_phase == 0)   /* after the last skipped frame: show the drawn one */
@@ -2758,9 +2927,9 @@ static void run_game(void)
       audio_submit();
       if (frame_ready)
       {
-         flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL), TOP_W * TOP_H * 2);
+         flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL), TOP_FB_BYTES);
          if (stereo_mode)
-            flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), TOP_W * TOP_H * 2);
+            flush_gpu(gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL), TOP_FB_BYTES);
          gfxScreenSwapBuffers(GFX_TOP, stereo_mode);
       }
       t2 = svcGetSystemTick();
@@ -2775,7 +2944,11 @@ static void run_game(void)
        * keep up the queue is already short and we don't wait at all. */
       if (audio_ok)
       {
-         while (audio_queued() > AUDIO_TARGET)
+         /* At most 3 frames: when the lid closes the system stops the DSP
+          * before we get to aptMainLoop(), so the queue never drains, and
+          * an endless wait here kept the 3DS from going to sleep (freeze). */
+         u64 give_up = svcGetSystemTick() + (u64)(TICKS_PER_MS * 50);
+         while (audio_queued() > AUDIO_TARGET && svcGetSystemTick() < give_up)
             svcSleepThread(500000);
       }
       else
@@ -2922,7 +3095,17 @@ int main(int argc, char **argv)
    gfxSetDoubleBuffering(GFX_TOP, true);
    gfxSetDoubleBuffering(GFX_BOTTOM, true);
    osSetSpeedupEnable(true);
-   hidSetRepeatParameters(18, 5);
+   {
+      /* the Old 2DS has no 800px mode */
+      u8 model = 0;
+      if (R_SUCCEEDED(cfguInit()))
+      {
+         if (R_SUCCEEDED(CFGU_GetSystemModel(&model)) && model == CFG_MODEL_2DS)
+            wide_allowed = false;
+         cfguExit();
+      }
+   }
+   hidSetRepeatParameters(15, 4);   /* first repeat after 1/4 s, then 15 per second */
 
    mkdir("sdmc:/3ds", 0777);
    mkdir(APP_DIR, 0777);
