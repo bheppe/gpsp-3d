@@ -27,6 +27,10 @@ cd "$WORK/core"
 sed -i 's/^  flush_ram_count++;$/  flush_ram_count++; { extern u32 test_flush_total; test_flush_total++; }/' cpu_threaded.c
 grep -q test_flush_total cpu_threaded.c
 echo 'u32 test_flush_total;' >> main.c
+# fill the translation caches with undefined instructions, so code that runs
+# a word it never wrote crashes here instead of only on hardware
+sed -i 's|^  ram_translation_ptr = last_ram_translation_ptr = &ram_translation_cache\[0\];$|&\n  { u32 *w = (u32*)rom_translation_cache, *e = (u32*)(rom_translation_cache + ROM_TRANSLATION_CACHE_SIZE); while (w < e) *w++ = 0xE7F000F0; w = (u32*)ram_translation_cache; e = (u32*)(ram_translation_cache + RAM_TRANSLATION_CACHE_SIZE); while (w < e) *w++ = 0xE7F000F0; }|' cpu_threaded.c
+grep -q 0xE7F000F0 cpu_threaded.c
 make platform=rpi1 CC=arm-linux-gnueabihf-gcc CXX=arm-linux-gnueabihf-g++ PROFILE=1 -j"$(nproc)" > "$WORK/build.log" 2>&1 \
   || { grep -E 'error' "$WORK/build.log" | head; exit 1; }
 OBJS=$(ls *.o arm/*.o libretro/*.o libretro/libretro-common/*/*.o)
