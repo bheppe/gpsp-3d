@@ -1,7 +1,7 @@
 # gpSP 3D roadmap
 
 What's been reported, what's done, and what's next. Reports come from
-[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.1 (updated Oct 24).
+[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.2 in progress (updated Oct 24).
 
 **Status key:** ✅ done · 🧪 done, needs testing on real hardware · 🔧 next up · 📋 planned · 💤 later / big project
 
@@ -24,11 +24,11 @@ What's been reported, what's done, and what's next. Reports come from
 
 | # | Problem or request | Reported by | Status |
 |---|---|---|---|
-| 1 | **3DS freezes when the lid is closed** while the app runs | Discord | 🔧 v0.1.2 |
-| 2 | **Menus feel laggy** (game list and in-game menu); possibly worse with big ROM folders | Cabjoy, Trvial, Discord | 🔧 v0.1.2 |
-| 3 | **Sharp scaling at Fit/Stretch looks like bad transparency** (uneven pixels break up dithering) | Surge And Finn (Discord) | 🔧 v0.1.2; use Crisp meanwhile |
-| 4 | **2D: use the top screen's 800px wide mode** for exact 3x horizontal pixels, sharper than now | myownfriend (#4) | 🔧 v0.1.2 |
-| 5 | **OpenLara (GBA homebrew): music but black screen** (software-rendered bitmap mode) | myownfriend (#5) | 🔧 v0.1.2, open-source game, can be tested |
+| 1 | **3DS freezes when the lid is closed** while the app runs | Discord | 🧪 v0.1.2: the game waited forever for sound that the system had stopped for sleep |
+| 2 | **Menus feel laggy** (game list and in-game menu); possibly worse with big ROM folders | Cabjoy, Trvial, Discord | 🧪 v0.1.2: the in-game menu looked for state files on the SD card every frame; game list scrolls faster when held |
+| 3 | **Sharp scaling at Fit/Stretch looks like bad transparency** (uneven pixels break up dithering) | Surge And Finn (Discord) | 🧪 v0.1.2: Sharp now keeps every pixel the same size |
+| 4 | **2D: use the top screen's 800px wide mode** for exact 3x horizontal pixels, sharper than now | myownfriend (#4) | 🧪 v0.1.2: automatic in 2D (3D off or slider down) at Fit / Stretch; not on Old 2DS |
+| 5 | **OpenLara (GBA homebrew): music but black screen** (software-rendered bitmap mode) | myownfriend (#5) | 🧪 v0.1.2: gpSP bug, an interrupt during FIQ mode corrupted r8-r12 (OpenLara draws in FIQ mode) |
 | 6 | **New 3DS: use the extra CPU cores** for drawing instead of sharing core 2 with the system | — | 📋 v0.1.2 |
 | 7 | Need for Speed Underground: ~4 fps on the title screen, then freezes | myownfriend (#2) | 🔧 needs the game to reproduce |
 | 8 | Stutter in Mario Golf: Advance Tour, "Galaxy" (?), NFS Underground | Discord | 📋 needs stats photos |
