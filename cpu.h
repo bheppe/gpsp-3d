@@ -172,7 +172,13 @@ extern u32 translation_gate_target_pc[MAX_TRANSLATION_GATES];
 extern u32 rom_branch_hash[ROM_BRANCH_HASH_SIZE];
 
 void flush_translation_cache_rom(void);
+/* After a write over translated RAM code: drops only the 1 KB pages noted
+ * with smc_note_write() where the dynarec supports it, else everything. */
 void flush_translation_cache_ram(void);
+/* Drops all translated RAM code (cache full, reset, interpreted VRAM code). */
+void flush_translation_cache_ram_full(void);
+/* A write hit translated RAM code at this GBA address. */
+void smc_note_write(u32 address);
 void dump_translation_cache(void);
 void init_dynarec_caches(void);
 void flush_dynarec_caches(void);

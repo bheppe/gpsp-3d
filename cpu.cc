@@ -3610,7 +3610,7 @@ u32 function_cc execute_arm_vram(u32 cycles)
   /* Interpreted routines may write I/EWRAM without the JIT's SMC handlers.
    * Discard those translations before returning to compiled execution. */
   PROF_FLUSH_CAUSE(PROF_FL_VRAM, vram_pc);
-  flush_translation_cache_ram();
+  flush_translation_cache_ram_full();
 #endif
   return result;
 }

@@ -24,6 +24,7 @@ extern prof_t prof_video;    /* update_scanline: GBA drawing      */
 extern prof_t prof_sound;    /* render_gbc_sound (sound mixing)   */
 extern prof_t prof_xlate;    /* dynarec translating new blocks    */
 extern u32 prof_ram_flushes; /* RAM translation cache flushes     */
+extern u32 prof_ram_pages;   /* RAM code pages dropped by writes  */
 extern u32 prof_rom_flushes; /* ROM translation cache flushes     */
 extern u32 prof_halt_cycles; /* GBA cycles spent halted/sleeping  */
 

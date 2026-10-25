@@ -2118,6 +2118,7 @@ const dma_region_type dma_region_map[17] =
   if (address##tfsize(iwram, type##_ptr & 0x7FFF))                            \
   {                                                                           \
     PROF_FLUSH_CAUSE(PROF_FL_DMA, 0x03000000 | (type##_ptr & 0x7FFF));        \
+    smc_note_write(0x03000000 | (type##_ptr & 0x7FFF));                       \
     alerts |= CPU_ALERT_SMC;                                                  \
   }                                                                           \
 
@@ -2145,6 +2146,7 @@ const dma_region_type dma_region_map[17] =
   if (address##tfsize(ewram, (type##_ptr & 0x3FFFF) + 0x40000))               \
   {                                                                           \
     PROF_FLUSH_CAUSE(PROF_FL_DMA, 0x02000000 | (type##_ptr & 0x3FFFF));       \
+    smc_note_write(0x02000000 | (type##_ptr & 0x3FFFF));                      \
     alerts |= CPU_ALERT_SMC;                                                  \
   }                                                                           \
 

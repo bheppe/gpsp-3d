@@ -1991,6 +1991,17 @@ void *div6, *divarm7;
   generate_update_pc(pc);                                                     \
   generate_indirect_branch_no_cycle_update(type)                              \
 
+/* Writes over RAM code drop only the 1 KB pages they hit (cpu_threaded.c).
+ * For that, RAM blocks never jump straight into another RAM block's
+ * translation: such exits go to this stub, which looks the target up. */
+#define HAVE_RAM_PAGE_INVALIDATE
+#define RAM_EXIT_STUB_SIZE 12
+#define generate_ram_exit_stub(target, thumb)                                 \
+  ARM_LDR_IMM(0, reg_a0, ARMREG_PC, 0);   /* r0 = the word after the next */ \
+  ARM_LDR_IMM(0, ARMREG_PC, reg_base,                                         \
+    4*(REG_USERDEF + ((thumb) ? armfn_indirect_thumb : armfn_indirect_arm))); \
+  write32(target)                                                             \
+
 
 extern u32 st_handler_functions[4][17];
 extern u32 ld_handler_functions[5][17];

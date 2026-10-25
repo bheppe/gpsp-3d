@@ -543,7 +543,7 @@ ext_store_iwram_u##store_type:                                               ;\
   sub r2, r2, #0x8000                     /* r2 = iwram smc base           */;\
   load_op r1, [r0, r2]                    /* r1 = SMC sentinel             */;\
   cmp r1, #0                              /* Check value, should be zero   */;\
-  bne 3f                                  /* if so perform smc write       */;\
+  bne 4f                                  /* if so perform smc write       */;\
   restore_flags()                                                            ;\
   add pc, lr, #4                          /* return                        */;\
                                                                              ;\
@@ -555,7 +555,7 @@ ext_store_ewram_u##store_type:                                               ;\
   add r2, r2, #0x40000                    /* r2 = ewram smc base           */;\
   load_op r1, [r0, r2]                    /* r1 = SMC sentinel             */;\
   cmp r1, #0                              /* Check value, should be zero   */;\
-  bne 3f                                  /* if so perform smc write       */;\
+  bne 5f                                  /* if so perform smc write       */;\
   restore_flags()                                                            ;\
   add pc, lr, #4                          /* return                        */;\
                                                                              ;\
@@ -584,6 +584,13 @@ ext_store_oam_ram_u##store_type:                                             ;\
   str r2, [reg_base, #OAM_UPDATED]        /* write non zero to signal      */;\
   add pc, lr, #4                          /* return                        */;\
                                                                              ;\
+4: /* SMC: note which page was written (r0 = offset in that RAM)       */   ;\
+  orr r0, r0, #0x03000000                                                    ;\
+  b 6f                                                                       ;\
+5:                                                                           ;\
+  orr r0, r0, #0x02000000                                                    ;\
+6:                                                                           ;\
+  call_c_function(smc_note_write)                                            ;\
 3: /* Flush RAM cache and "resume" execution via re-compile */               ;\
   ldr r0, [lr]                            /* load PC                       */;\
   str r0, [reg_base, #REG_PC]             /* write out PC                  */;\

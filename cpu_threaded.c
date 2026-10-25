@@ -2492,6 +2492,67 @@ void translate_icache_sync() {
 // 0xXXXX : this is the start of a translated block, starting from 0xFFFF downwards
 //          LSB is always set (we decrement by two) to ensure both bytes != 0
 //
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+/* Writes over translated RAM code. Instead of dropping all RAM code, only
+ * the 1 KB pages written to are dropped (games like Mario Golf: Advance Tour
+ * patch their own IWRAM routines and copy code overlays in many times per
+ * frame). For each page: the lowest start of any block that reaches into
+ * it, so blocks starting in an earlier page are dropped too. */
+#define RAM_PAGE_SHIFT 10
+#define IWRAM_PAGES    (0x8000 >> RAM_PAGE_SHIFT)
+#define EWRAM_PAGES    (0x40000 >> RAM_PAGE_SHIFT)
+static u32 iwram_page_lo[IWRAM_PAGES], ewram_page_lo[EWRAM_PAGES];
+static u32 iwram_smc_pending, ewram_smc_pending[EWRAM_PAGES / 32];
+static bool smc_pending;
+
+static void ram_pages_reset(void)
+{
+  memset(iwram_page_lo, 0xFF, sizeof(iwram_page_lo));
+  memset(ewram_page_lo, 0xFF, sizeof(ewram_page_lo));
+  iwram_smc_pending = 0;
+  memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
+  smc_pending = false;
+}
+
+/* a RAM block was scanned: [start, end) are its instructions */
+static void ram_block_pages(u32 start, u32 end)
+{
+  u32 *lo = start < 0x03000000 ? ewram_page_lo : iwram_page_lo;
+  u32 mask = start < 0x03000000 ? 0x3FFFF : 0x7FFF;
+  u32 s = start & mask, e = (end - 1) & mask, p;
+  if (e < s)
+    e = mask;   /* (ran to the end of the region) */
+  for (p = s >> RAM_PAGE_SHIFT; p <= e >> RAM_PAGE_SHIFT; p++)
+    if (s < lo[p])
+      lo[p] = s;
+}
+#endif
+
+void smc_note_write(u32 address)
+{
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+  u32 off, p;
+  bool ew = (address >> 24) == 0x02;
+  off = address & (ew ? 0x3FFFF : 0x7FFF);
+  p = off >> RAM_PAGE_SHIFT;
+  /* the page, and the one before when near its start: a store-multiple is
+   * only checked at its last word, the others may lie in the page before */
+  for (;;)
+  {
+    if (ew)
+      ewram_smc_pending[p >> 5] |= 1u << (p & 31);
+    else
+      iwram_smc_pending |= 1u << p;
+    if (!p || (off & ((1 << RAM_PAGE_SHIFT) - 1)) >= 64 || off >> RAM_PAGE_SHIFT != p)
+      break;
+    p--;
+  }
+  smc_pending = true;
+#else
+  (void)address;
+#endif
+}
+
 // The tag value is an index to a `ramtag_type` structure that sits at the end
 // of the RAM CACHE (grows like a stack). For simplicity we start tags at 0xFFFF
 // and grow like a stack.
@@ -2502,6 +2563,11 @@ void translate_icache_sync() {
 #define CODE_TAG_BLOCK32   0x01010101
 
 #define VALID_TAG(tagn) (tagn > LAST_TAG_NUM)
+/* Tags count down from 0xFFFF and index the tag table (which grows down
+ * from the end of the RAM cache) as signed 16-bit values: below 0x8000 the
+ * index would point past the end of the cache, into the ROM cache. So the
+ * RAM cache is flushed before the tags get there. */
+#define RAM_TAG_LOW        0x8010
 
 #define allocate_tag_arm(location) {   \
   location[0] = ram_block_tag;         \
@@ -2594,6 +2660,31 @@ static bool process_deferred_exits(void)
     branch_target = deferred_exits[deferred_exit_count].branch_target;
     thumb         = deferred_exits[deferred_exit_count].thumb;
 
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+    /* RAM block -> RAM code: through a lookup stub, never directly into the
+     * other block's translation (which a write may drop on its own) */
+    if(((branch_target >> 24) == 0x02 || (branch_target >> 24) == 0x03) &&
+     branch_source >= ram_translation_cache &&
+     branch_source < ram_translation_cache + RAM_TRANSLATION_CACHE_SIZE)
+    {
+      u8 *translation_ptr = ram_translation_ptr;
+      u8 *limit = &ram_translation_cache[RAM_TRANSLATION_CACHE_SIZE
+       - TRANSLATION_CACHE_LIMIT_THRESHOLD
+       - (0x10000 - ram_block_tag) / 2 * sizeof(ramtag_type)];
+      if(translation_ptr + RAM_EXIT_STUB_SIZE > limit)
+      {
+        PROF_FLUSH_CAUSE(PROF_FL_FULL, branch_target);
+        flush_translation_cache_ram_full();
+        return false;
+      }
+      translation_target = translation_ptr;
+      generate_ram_exit_stub(branch_target, thumb);
+      ram_translation_ptr = translation_ptr;
+      generate_branch_patch_unconditional(branch_source, translation_target);
+      continue;
+    }
+#endif
+
     if(branch_target == 0x00000008)
       translation_target = bios_swi_entrypoint;
     else if(thumb)
@@ -2650,6 +2741,11 @@ u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
       ramtag_type* trentry;                                                   \
       /* Allocate a tag if not a valid one, and initialize header */          \
       if (!VALID_TAG(*tagp)) {                                                \
+        if (ram_block_tag < RAM_TAG_LOW) {                                    \
+          /* out of tags: start over (the lookup is retried) */               \
+          flush_translation_cache_ram_full();                                 \
+          return NULL;                                                        \
+        }                                                                     \
         allocate_tag_##type(tagp);                                            \
         trentry = get_ram_tag(*tagp);                                         \
         trentry->offset_arm = 0;                                              \
@@ -3192,6 +3288,9 @@ bool translate_block_arm(u32 pc, bool ram_region)
   if(ram_region)
   {
     scan_block(arm, yes);
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+    ram_block_pages(block_start_pc, block_end_pc);
+#endif
   }
   else
   {
@@ -3240,7 +3339,7 @@ bool translate_block_arm(u32 pc, bool ram_region)
       if (ram_region)
       {
         PROF_FLUSH_CAUSE(PROF_FL_FULL, pc);
-        flush_translation_cache_ram();
+        flush_translation_cache_ram_full();
       }
       else
         flush_translation_cache_rom();
@@ -3343,6 +3442,9 @@ bool translate_block_thumb(u32 pc, bool ram_region)
   if(ram_region)
   {
     scan_block(thumb, yes);
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+    ram_block_pages(block_start_pc, block_end_pc);
+#endif
   }
   else
   {
@@ -3390,7 +3492,7 @@ bool translate_block_thumb(u32 pc, bool ram_region)
       if (ram_region)
       {
         PROF_FLUSH_CAUSE(PROF_FL_FULL, pc);
-        flush_translation_cache_ram();
+        flush_translation_cache_ram_full();
       }
       else
         flush_translation_cache_rom();
@@ -3451,9 +3553,58 @@ void init_bios_hooks(void)
   rom_cache_watermark = (u32)(rom_translation_ptr - rom_translation_cache);
 }
 
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+/* drop the blocks that reach into page p of this RAM's SMC area */
+static void ram_page_drop(u16 *smc, const u32 *lo, u32 p)
+{
+  u32 start = p << RAM_PAGE_SHIFT, end = start + (1 << RAM_PAGE_SHIFT), a;
+  if (lo[p] < start)
+    start = lo[p];
+  for (a = start; a < end; a += 2)
+    if (VALID_TAG(smc[a >> 1]))
+      smc[a >> 1] = CODE_TAG_BLOCK16;   /* still code (writes are seen), no longer a block */
+#ifdef GPSP_PROFILE
+  prof_ram_pages++;
+#endif
+}
+#endif
+
 void flush_translation_cache_ram(void)
 {
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+  /* A write hit RAM code: drop only the pages written to. Their blocks'
+   * tags become plain code markers, so the next lookup translates them
+   * again. The old code stays in the cache until it fills up. Keep tags in
+   * hand: each new translation takes one (see RAM_TAG_LOW). */
+  if (smc_pending && ram_block_tag > RAM_TAG_LOW + 0x400)
+  {
+    u32 p, w;
+    for (p = 0; p < IWRAM_PAGES; p++)
+      if (iwram_smc_pending & (1u << p))
+        ram_page_drop((u16*)iwram, iwram_page_lo, p);
+    for (w = 0; w < EWRAM_PAGES / 32; w++)
+      if (ewram_smc_pending[w])
+        for (p = 0; p < 32; p++)
+          if (ewram_smc_pending[w] & (1u << p))
+            ram_page_drop((u16*)&ewram[0x40000], ewram_page_lo, w * 32 + p);
+    iwram_smc_pending = 0;
+    memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
+    smc_pending = false;
+#ifdef GPSP_PROFILE
+    PROF_FLUSH_CAUSE(PROF_FL_STORE, 0);
+#endif
+    return;
+  }
+#endif
+  flush_translation_cache_ram_full();
+}
+
+void flush_translation_cache_ram_full(void)
+{
   /* Flushes RAM caches avoiding doing too much work (ie. wiping unused memory) */
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+  ram_pages_reset();
+#endif
   flush_ram_count++;
 #ifdef GPSP_PROFILE
   prof_ram_flushes++;
@@ -3516,6 +3667,9 @@ void init_dynarec_caches(void)
   ram_translation_ptr = last_ram_translation_ptr = &ram_translation_cache[0];
   memset(iwram, 0, 0x8000);
   memset(&ewram[0x40000], 0, 0x40000);
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+  ram_pages_reset();
+#endif
 
   ewram_code_min = 0;
   ewram_code_max = 0x40000;
@@ -3531,6 +3685,6 @@ void flush_dynarec_caches(void)
   ewram_code_max = 0x40000;
   iwram_code_min = 0;
   iwram_code_max = 0x8000;
-  flush_translation_cache_ram();
+  flush_translation_cache_ram_full();
 }
 
