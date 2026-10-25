@@ -81,6 +81,9 @@ typedef struct {
   s32 affx[2], affy[2];
   u8  has_pal, has_oam;
   u8  vram_idx;                 /* which VRAM copy this line reads */
+  u16 bm_len;                   /* bitmap row kept with the line (bytes), */
+  u32 bm_off;                   /* and where it goes in VRAM              */
+  u8  bm[480];
   u16 pal[512];
   u16 oam[512];
 } vt_line;
@@ -134,7 +137,7 @@ static unsigned vram_copies, vram_syncs;
 #define VT_ALL_BLOCKS 0xFFFFFFu
 
 /* 4KB VRAM blocks the renderer can read for a line with these registers */
-static u32 vt_blocks_read(void)
+static u32 vt_blocks_read(int bitmap_row_kept)
 {
   u16 dispcnt = read_ioreg(REG_DISPCNT);
   u32 mode = dispcnt & 7, m = 0;
@@ -147,7 +150,7 @@ static u32 vt_blocks_read(void)
     if (dispcnt & 0x0F00)
       m |= 0x00FFFFu;                 /* tiled BGs: anything in 0..64KB */
   }
-  else if (dispcnt & 0x0400)          /* bitmap modes draw BG2 only */
+  else if ((dispcnt & 0x0400) && !bitmap_row_kept)   /* bitmap modes draw BG2 only */
   {
     if (mode == 3)
       m |= 0x07FFFFu;                 /* 0x00000-0x12BFF */
@@ -159,10 +162,43 @@ static u32 vt_blocks_read(void)
   return m;
 }
 
-/* bring copy i up to date with the live VRAM (only its stale blocks) */
-static void vt_vram_refresh(unsigned i)
+/* Bitmap modes (3-5) without rotation read one row of the bitmap per line.
+ * That row is kept with the line instead of in a VRAM copy: games that draw
+ * the next frame into VRAM while this one is shown (3D homebrew like the
+ * Super Mario Galaxy GBA port, whose two 120-pixel pages share every row)
+ * would otherwise need a new copy of VRAM on almost every line. Returns 1
+ * if so, with the row's place in VRAM (len 0: no row on this line). */
+static int vt_bitmap_row(u32 *off, u32 *len)
 {
-  u32 st = vt_vram_stale[i];
+  u16 dispcnt = read_ioreg(REG_DISPCNT);
+  u32 mode = dispcnt & 7, w, h, bpp, base = 0;
+  s32 row;
+  if (mode < 3 || mode > 5 || !(dispcnt & 0x0400) || (dispcnt & 0x80))
+    return 0;
+  if (read_ioreg(REG_BG2PC) != 0)    /* rotated: rows change along the line */
+    return 0;
+  if (mode == 3)
+  { w = 240; h = 160; bpp = 2; }
+  else if (mode == 4)
+  { w = 240; h = 160; bpp = 1; base = (dispcnt & 0x10) ? 0xA000 : 0; }
+  else
+  { w = 160; h = 128; bpp = 2; base = (dispcnt & 0x10) ? 0xA000 : 0; }
+  row = affine_reference_y[0] >> 8;  /* as render_scanline_bitmap */
+  *off = 0;
+  *len = 0;
+  if ((u32)row < h)
+  {
+    *off = base + (u32)row * w * bpp;
+    *len = w * bpp;
+  }
+  return 1;
+}
+
+/* bring copy i up to date with the live VRAM in the blocks in mask (other
+ * stale blocks stay stale until a line needs them) */
+static void vt_vram_refresh(unsigned i, u32 mask)
+{
+  u32 st = vt_vram_stale[i] & mask;
   u8 *dst = VT_VRAM(i);
   while (st)
   {
@@ -174,7 +210,7 @@ static void vt_vram_refresh(unsigned i)
     st &= ~(((1u << n) - 1) << b);
     vram_copies++;
   }
-  vt_vram_stale[i] = 0;
+  vt_vram_stale[i] &= ~mask;
 }
 static unsigned lines_pushed;                /* emulation side */
 static volatile unsigned lines_done;         /* render side */
@@ -314,6 +350,8 @@ static void draw_line(vt_frame *f, unsigned vcount)
     reg[OAM_UPDATED] = 1;
   }
   vram = VT_VRAM(l->vram_idx);
+  if (l->bm_len)   /* this line's bitmap row (the copy's may be older) */
+    memcpy(vram + l->bm_off, l->bm, l->bm_len);
   gba_screen_pixels = f->pixels;
 
   /* Same as the drawing half of update_scanline() */
@@ -630,6 +668,7 @@ void video_thread_record_line(unsigned vcount)
 {
   vt_frame *f = slots[rec_slot];
   vt_line *l;
+  u32 bm_off = 0, bm_len = 0, need;
 
   if (vcount >= VT_LINES)
     return;
@@ -648,7 +687,8 @@ void video_thread_record_line(unsigned vcount)
   }
   /* Only blocks this line can read matter: writes elsewhere (e.g. the back
    * buffer of a bitmap-mode game) wait until they are needed. */
-  if (vt_vram_stale[vt_vram_cur] & vt_blocks_read())
+  need = vt_blocks_read(vt_bitmap_row(&bm_off, &bm_len));
+  if (vt_vram_stale[vt_vram_cur] & need)
   {
     if (rec_lines)
     {
@@ -667,7 +707,7 @@ void video_thread_record_line(unsigned vcount)
     }
     /* at the start of a frame the render thread is idle (finish_frame
      * waited for it), so the current copy can be refreshed in place */
-    vt_vram_refresh(vt_vram_cur);
+    vt_vram_refresh(vt_vram_cur, need);
   }
 
   if (!rec_lines)
@@ -697,6 +737,10 @@ void video_thread_record_line(unsigned vcount)
   }
 
   l->vram_idx = (u8)vt_vram_cur;
+  l->bm_off = bm_off;
+  l->bm_len = (u16)bm_len;
+  if (bm_len)
+    memcpy(l->bm, vram + bm_off, bm_len);
   rec_lines++;
   lines_pushed++;
   vt_vram_last_use[vt_vram_cur] = lines_pushed;
