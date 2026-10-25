@@ -32,6 +32,7 @@ bool prof_enabled = false;
 
 prof_t prof_video, prof_sound, prof_xlate;
 u32 prof_ram_flushes, prof_rom_flushes, prof_halt_cycles, prof_ram_pages;
+u32 prof_ram_reused;
 
 static prof_t emu_ticks, aud_ticks, out_ticks, gap_ticks;
 static prof_t t_begin, t_emu_done, t_aud_done, t_last_end;
@@ -90,6 +91,7 @@ void prof_reset(void)
 {
    prof_video = prof_sound = prof_xlate = 0;
    prof_ram_flushes = prof_rom_flushes = prof_halt_cycles = prof_ram_pages = 0;
+   prof_ram_reused = 0;
    emu_ticks = aud_ticks = out_ticks = gap_ticks = 0;
    frames = 0;
    skip_gap = true;
@@ -156,9 +158,9 @@ static void write_log(float cpu, float gfx, float snd, float jit,
                  "aud = audio_cb, wait = outside the core\n", (const char*)&code);
 
    fprintf(f, "cpu %.2f gfx %.2f snd %.2f jit %.2f | out %.2f aud %.2f wait %.2f | "
-              "halt %u%% ramflush %u romflush %u rampages %u\n",
+              "halt %u%% ramflush %u romflush %u rampages %u reused %u\n",
          cpu, gfx, snd, jit, out, aud, wait, halt_pct,
-         prof_ram_flushes, prof_rom_flushes, prof_ram_pages);
+         prof_ram_flushes, prof_rom_flushes, prof_ram_pages, prof_ram_reused);
 
    /* RAM flushes since the last entry: which GBA code wrote over translated
     * code, and how much RAM code there was to throw away */

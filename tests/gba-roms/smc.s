@@ -1,5 +1,5 @@
 @ Self-modifying code test ROM for gpSP (patterns from Mario Golf: Advance Tour).
-@ Results go to EWRAM 0x02000000: [0] = 0x600DF00D when done, [1..9] = checksums.
+@ Results go to EWRAM 0x02000000: [0] = 0x600DF00D when done, [1..14] = checksums.
 @ The dynarec must give exactly the interpreter's results.
 
     .syntax unified
@@ -52,6 +52,7 @@ round:
     bl testJ
     bl testK
     bl testL
+    bl testM
     subs r11, r11, #1
     bne round
 
@@ -331,6 +332,30 @@ testL:
     pop {r4, lr}
     bx lr
 
+@ M: like E (a block across a page boundary, patched in its second page),
+@ but switched back and forth between two versions, so the dynarec can use
+@ its old translations again. A reused block must be dropped like a newly
+@ translated one when it is patched again.
+testM:
+    push {r4, lr}
+    mov r4, #0
+1:  ldr r0, =patchM
+    ldr r1, =0xE2800000             @ add r0, r0, #imm
+    tst r4, #1
+    orrne r1, r1, #7
+    str r1, [r0]
+    mov r0, #1
+    ldr r12, =spanM
+    mov lr, pc
+    bx r12
+    add r0, r0, r4
+    accum 14
+    add r4, r4, #1
+    cmp r4, #40
+    blo 1b
+    pop {r4, lr}
+    bx lr
+
     .ltorg
 
 @ ---------------------------------------------------------------- IWRAM
@@ -457,6 +482,20 @@ callerL:                            @ 2000 calls to calleeL
 calleeL:
     add r0, r0, #3
     eor r0, r0, r0, lsr #5
+    bx lr
+
+    .align 10
+    .space 1024 - 16                @ spanM starts 16 bytes before a page boundary
+spanM:
+    add r0, r0, #3
+    add r0, r0, r0
+    eor r0, r0, #5
+    .rept 30
+    eor r0, r0, r0, lsr #1
+    .endr
+patchM:
+    add r0, r0, #0
+    mov r0, r0, lsl #3
     bx lr
 
     .align 10

@@ -2492,6 +2492,9 @@ void translate_icache_sync() {
 // 0xXXXX : this is the start of a translated block, starting from 0xFFFF downwards
 //          LSB is always set (we decrement by two) to ensure both bytes != 0
 //
+#define CODE_TAG_BLOCK16   0x0101
+#define CODE_TAG_BLOCK32   0x01010101
+
 #ifdef HAVE_RAM_PAGE_INVALIDATE
 /* Writes over translated RAM code. Instead of dropping all RAM code, only
  * the 1 KB pages written to are dropped (games like Mario Golf: Advance Tour
@@ -2538,6 +2541,114 @@ static void ram_block_pages(u32 start, u32 end)
       hi[p] = e + 4;   /* past its last instruction */
   }
 }
+
+/* Translations of RAM code that was written over stay in the cache until it
+ * fills up. Games that switch a routine between a few versions (Mario Golf:
+ * Advance Tour patches its scanline code all the time) get the old
+ * translation back when the same code comes back, instead of translating it
+ * again: each translation is kept with a copy of the GBA code it was made
+ * from, and used again only when RAM holds exactly that code again. */
+#define REUSE_BUCKETS 4096
+#define REUSE_MAX     16384
+#define REUSE_POOL    (512 * 1024)
+#define REUSE_CHAIN   128
+typedef struct
+{
+  u32 key;          /* pc | thumb */
+  u32 len;          /* bytes of GBA code */
+  u32 cache_off;    /* where its translation is */
+  u32 bytes_off;    /* its copy in ram_reuse_pool */
+  u32 next;         /* index + 1 of the next one in the bucket, 0 = none */
+} ram_reuse_type;
+static ram_reuse_type ram_reuse[REUSE_MAX];
+static u32 ram_reuse_head[REUSE_BUCKETS];
+static u32 ram_reuse_n, ram_reuse_pool_n;
+static u8 ram_reuse_pool[REUSE_POOL];
+/* the RAM block translate_block_* scanned last */
+static u32 xl_ram_start, xl_ram_end;
+
+static void ram_reuse_reset(void)
+{
+  memset(ram_reuse_head, 0, sizeof(ram_reuse_head));
+  ram_reuse_n = ram_reuse_pool_n = 0;
+}
+
+static inline u32 ram_reuse_bucket(u32 key)
+{
+  return (key * 2654435761U) >> (32 - 12);
+}
+
+static inline const u8 *ram_code_bytes(u32 a)
+{
+  return (a >> 24) == 0x02 ? &ewram[a & 0x3FFFF] : &iwram[0x8000 + (a & 0x7FFF)];
+}
+
+/* a RAM block was translated at cache_off from [start, end) */
+static void ram_reuse_add(u32 key, u32 start, u32 end, u32 cache_off)
+{
+  u32 len = end - start, b;
+  ram_reuse_type *r;
+  if (end <= start || len > 8192 || ((end - 1) >> 24) != (start >> 24))
+    return;
+  if (ram_reuse_n == REUSE_MAX || ram_reuse_pool_n + len > REUSE_POOL)
+    ram_reuse_reset();   /* only loses the chance to reuse older ones */
+  b = ram_reuse_bucket(key);
+  r = &ram_reuse[ram_reuse_n];
+  r->key = key;
+  r->len = len;
+  r->cache_off = cache_off;
+  r->bytes_off = ram_reuse_pool_n;
+  r->next = ram_reuse_head[b];
+  memcpy(&ram_reuse_pool[ram_reuse_pool_n], ram_code_bytes(start), len);
+  ram_reuse_pool_n += (len + 3) & ~3U;
+  ram_reuse_head[b] = ++ram_reuse_n;
+}
+
+/* An old translation of exactly the code now at pc, or 0. If found, the SMC
+ * marks and page ranges are set as translating it would have. */
+static u32 ram_reuse_find(u32 pc, u32 thumb)
+{
+  u32 key = pc | thumb, i = ram_reuse_head[ram_reuse_bucket(key)], n = 0;
+  const u8 *src = ram_code_bytes(pc);
+  u32 lim = (pc >> 24) == 0x02 ? 0x40000 : 0x8000;
+  while (i && n++ < REUSE_CHAIN)
+  {
+    ram_reuse_type *r = &ram_reuse[i - 1];
+    if (r->key == key && (pc & (lim - 1)) + r->len <= lim &&
+        !memcmp(src, &ram_reuse_pool[r->bytes_off], r->len))
+    {
+      u8 *smc = (pc >> 24) == 0x02 ? &ewram[0x40000] : iwram;
+      u32 s = pc & (lim - 1), e = s + r->len, a;
+      /* "code here" marks, as scan_block writes them */
+      if (thumb)
+      {
+        for (a = s; a < e; a += 2)
+          if (!*(u16*)(smc + a))
+            *(u16*)(smc + a) = CODE_TAG_BLOCK16;
+      }
+      else
+      {
+        for (a = s; a < e; a += 4)
+          if (!*(u32*)(smc + a))
+            *(u32*)(smc + a) = CODE_TAG_BLOCK32;
+      }
+      if (lim == 0x8000) {
+        iwram_code_min = MIN(s, iwram_code_min);
+        iwram_code_max = MAX(e - (thumb ? 2 : 4), iwram_code_max);
+      } else {
+        ewram_code_min = MIN(s, ewram_code_min);
+        ewram_code_max = MAX(e - (thumb ? 2 : 4), ewram_code_max);
+      }
+      ram_block_pages(pc, pc + r->len);
+#ifdef GPSP_PROFILE
+      prof_ram_reused++;
+#endif
+      return r->cache_off;
+    }
+    i = r->next;
+  }
+  return 0;
+}
 #endif
 
 void smc_note_write(u32 address)
@@ -2571,8 +2682,6 @@ void smc_note_write(u32 address)
 
 #define LAST_TAG_NUM       0x0101
 #define INITIAL_TOP_TAG    0xFFFF
-#define CODE_TAG_BLOCK16   0x0101
-#define CODE_TAG_BLOCK32   0x01010101
 
 #define VALID_TAG(tagn) (tagn > LAST_TAG_NUM)
 /* Tags count down from 0xFFFF and index the tag table (which grows down
@@ -2748,6 +2857,24 @@ static bool process_deferred_exits(void)
 #define vram_lookup_region
 #endif
 
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+#define RAM_REUSE_TRY(type)                                                   \
+        if (!translate_depth) {                                               \
+          u32 old = ram_reuse_find(pc, thumb);                                \
+          if (old) {                                                          \
+            trentry->offset_##type = old;                                     \
+            return &ram_translation_cache[old];                               \
+          }                                                                   \
+        }
+#define RAM_REUSE_ADD(type)                                                   \
+          if (!translate_depth && xl_ram_start == pc)                         \
+            ram_reuse_add(pc | thumb, xl_ram_start, xl_ram_end,               \
+                          trentry->offset_##type);
+#else
+#define RAM_REUSE_TRY(type)
+#define RAM_REUSE_ADD(type)
+#endif
+
 #define block_lookup_translate_builder(type)                                  \
 u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
 {                                                                             \
@@ -2783,7 +2910,9 @@ u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
       if (!trentry->offset_##type) {                                          \
         bool result;                                                          \
         u8 *blkptr = ram_translation_ptr + block_prologue_size;               \
+        RAM_REUSE_TRY(type)                                                   \
         trentry->offset_##type = blkptr - ram_translation_cache;              \
+        xl_ram_start = xl_ram_end = 0;                                        \
         PROF_BEGIN(t_xl);                                                     \
         translate_depth++;                                                    \
         result = translate_block_##type(pc, true);                            \
@@ -2794,8 +2923,10 @@ u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
         if (!result && !translate_depth)                                      \
           deferred_exit_count = 0;                                            \
                                                                               \
-        if (result)                                                           \
+        if (result) {                                                         \
+          RAM_REUSE_ADD(type)                                                 \
           return blkptr;                                                      \
+        }                                                                     \
       } else {                                                                \
         return &ram_translation_cache[trentry->offset_##type];                \
       }                                                                       \
@@ -3316,6 +3447,8 @@ bool translate_block_arm(u32 pc, bool ram_region)
     scan_block(arm, yes);
 #ifdef HAVE_RAM_PAGE_INVALIDATE
     ram_block_pages(block_start_pc, block_end_pc);
+    xl_ram_start = block_start_pc;
+    xl_ram_end = block_end_pc;
 #endif
   }
   else
@@ -3470,6 +3603,8 @@ bool translate_block_thumb(u32 pc, bool ram_region)
     scan_block(thumb, yes);
 #ifdef HAVE_RAM_PAGE_INVALIDATE
     ram_block_pages(block_start_pc, block_end_pc);
+    xl_ram_start = block_start_pc;
+    xl_ram_end = block_end_pc;
 #endif
   }
   else
@@ -3655,6 +3790,7 @@ void flush_translation_cache_ram_full(void)
   /* Flushes RAM caches avoiding doing too much work (ie. wiping unused memory) */
 #ifdef HAVE_RAM_PAGE_INVALIDATE
   ram_pages_reset();
+  ram_reuse_reset();
 #endif
   flush_ram_count++;
 #ifdef GPSP_PROFILE
@@ -3720,6 +3856,7 @@ void init_dynarec_caches(void)
   memset(&ewram[0x40000], 0, 0x40000);
 #ifdef HAVE_RAM_PAGE_INVALIDATE
   ram_pages_reset();
+  ram_reuse_reset();
 #endif
 
   ewram_code_min = 0;
