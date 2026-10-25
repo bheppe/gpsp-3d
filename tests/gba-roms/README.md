@@ -10,7 +10,7 @@ The script builds the core for ARM Linux with Raspberry Pi 1 settings (an ARM11,
 
 | ROM | What it checks |
 |---|---|
-| `smc.s` | Code that changes code in RAM, as in Mario Golf: Advance Tour: a loop patched before every call, a variable inside a code block, code copied in by DMA, calls into a patched routine in another page, a block across a page boundary, Thumb and EWRAM code, and store-multiple patches across a page boundary. Every checksum must match the interpreter's. |
+| `smc.s` | Code that changes code in RAM, as in Mario Golf: Advance Tour: a loop patched before every call, a variable inside a code block, code copied in by DMA, calls into a patched routine in another page, a block across a page boundary, Thumb and EWRAM code, store-multiple patches across a page boundary, a code buffer reused for data, and calls between RAM routines. Every checksum must match the interpreter's. |
 | `fiq.s` | FIQ mode keeps its own r8-r12 while IRQs come in (OpenLara draws in FIQ mode). Green screen = pass. |
 
-`harness.c` is a minimal libretro frontend: `harness ROM dynarec(0/1) frames [out.ppm]`. It prints the RAM flush count and the first words of EWRAM, where `smc.s` leaves its checksums.
+`harness.c` is a minimal libretro frontend: `harness ROM dynarec(0/1) frames [out.ppm]`. It prints the full RAM flush count, the RAM code pages dropped by writes, and the first words of EWRAM, where `smc.s` leaves its checksums.

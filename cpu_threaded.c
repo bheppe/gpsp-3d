@@ -2496,12 +2496,13 @@ void translate_icache_sync() {
 /* Writes over translated RAM code. Instead of dropping all RAM code, only
  * the 1 KB pages written to are dropped (games like Mario Golf: Advance Tour
  * patch their own IWRAM routines and copy code overlays in many times per
- * frame). For each page: the lowest start of any block that reaches into
- * it, so blocks starting in an earlier page are dropped too. */
+ * frame). For each page: the lowest start and the highest end of the
+ * blocks that reach into it, so blocks that run across pages go too. */
 #define RAM_PAGE_SHIFT 10
 #define IWRAM_PAGES    (0x8000 >> RAM_PAGE_SHIFT)
 #define EWRAM_PAGES    (0x40000 >> RAM_PAGE_SHIFT)
 static u32 iwram_page_lo[IWRAM_PAGES], ewram_page_lo[EWRAM_PAGES];
+static u32 iwram_page_hi[IWRAM_PAGES], ewram_page_hi[EWRAM_PAGES];
 static u32 iwram_smc_pending, ewram_smc_pending[EWRAM_PAGES / 32];
 static bool smc_pending;
 
@@ -2509,6 +2510,8 @@ static void ram_pages_reset(void)
 {
   memset(iwram_page_lo, 0xFF, sizeof(iwram_page_lo));
   memset(ewram_page_lo, 0xFF, sizeof(ewram_page_lo));
+  memset(iwram_page_hi, 0, sizeof(iwram_page_hi));
+  memset(ewram_page_hi, 0, sizeof(ewram_page_hi));
   iwram_smc_pending = 0;
   memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
   smc_pending = false;
@@ -2518,13 +2521,18 @@ static void ram_pages_reset(void)
 static void ram_block_pages(u32 start, u32 end)
 {
   u32 *lo = start < 0x03000000 ? ewram_page_lo : iwram_page_lo;
+  u32 *hi = start < 0x03000000 ? ewram_page_hi : iwram_page_hi;
   u32 mask = start < 0x03000000 ? 0x3FFFF : 0x7FFF;
   u32 s = start & mask, e = (end - 1) & mask, p;
   if (e < s)
     e = mask;   /* (ran to the end of the region) */
   for (p = s >> RAM_PAGE_SHIFT; p <= e >> RAM_PAGE_SHIFT; p++)
+  {
     if (s < lo[p])
       lo[p] = s;
+    if (e + 4 > hi[p])
+      hi[p] = e + 4;   /* past its last instruction */
+  }
 }
 #endif
 
@@ -3554,15 +3562,33 @@ void init_bios_hooks(void)
 }
 
 #ifdef HAVE_RAM_PAGE_INVALIDATE
-/* drop the blocks that reach into page p of this RAM's SMC area */
-static void ram_page_drop(u16 *smc, const u32 *lo, u32 p)
+/* Drop the blocks that reach into page p of this RAM. The range grows to
+ * every block that reaches into a page it touches, so it holds whole blocks
+ * only and can be cleared completely, like a full flush does: writes there
+ * are then free again until code is translated there again (keeping "code
+ * here" marks instead made every later write trap). */
+static void ram_page_drop(u8 *smc, u32 *lo, u32 *hi, u32 size, u32 p)
 {
-  u32 start = p << RAM_PAGE_SHIFT, end = start + (1 << RAM_PAGE_SHIFT), a;
-  if (lo[p] < start)
-    start = lo[p];
-  for (a = start; a < end; a += 2)
-    if (VALID_TAG(smc[a >> 1]))
-      smc[a >> 1] = CODE_TAG_BLOCK16;   /* still code (writes are seen), no longer a block */
+  u32 start = p << RAM_PAGE_SHIFT, end = start + (1 << RAM_PAGE_SHIFT), q;
+  bool grew = true;
+  while (grew)
+  {
+    grew = false;
+    for (q = start >> RAM_PAGE_SHIFT; q <= (end - 1) >> RAM_PAGE_SHIFT; q++)
+    {
+      if (lo[q] < start) { start = lo[q]; grew = true; }
+      if (hi[q] > end)   { end = hi[q];   grew = true; }
+    }
+    if (end > size)
+      end = size;
+  }
+  start &= ~3U;
+  memset(smc + start, 0, end - start);
+  for (q = start >> RAM_PAGE_SHIFT; q <= (end - 1) >> RAM_PAGE_SHIFT; q++)
+  {
+    lo[q] = ~0U;   /* no blocks left there */
+    hi[q] = 0;
+  }
 #ifdef GPSP_PROFILE
   prof_ram_pages++;
 #endif
@@ -3572,21 +3598,21 @@ static void ram_page_drop(u16 *smc, const u32 *lo, u32 p)
 void flush_translation_cache_ram(void)
 {
 #ifdef HAVE_RAM_PAGE_INVALIDATE
-  /* A write hit RAM code: drop only the pages written to. Their blocks'
-   * tags become plain code markers, so the next lookup translates them
-   * again. The old code stays in the cache until it fills up. Keep tags in
-   * hand: each new translation takes one (see RAM_TAG_LOW). */
+  /* A write hit RAM code: drop only the pages written to (and the blocks
+   * reaching into them); the next lookup translates them again. The old
+   * code stays in the cache until it fills up. Keep tags in hand: each new
+   * translation takes one (see RAM_TAG_LOW). */
   if (smc_pending && ram_block_tag > RAM_TAG_LOW + 0x400)
   {
     u32 p, w;
     for (p = 0; p < IWRAM_PAGES; p++)
       if (iwram_smc_pending & (1u << p))
-        ram_page_drop((u16*)iwram, iwram_page_lo, p);
+        ram_page_drop(iwram, iwram_page_lo, iwram_page_hi, 0x8000, p);
     for (w = 0; w < EWRAM_PAGES / 32; w++)
       if (ewram_smc_pending[w])
         for (p = 0; p < 32; p++)
           if (ewram_smc_pending[w] & (1u << p))
-            ram_page_drop((u16*)&ewram[0x40000], ewram_page_lo, w * 32 + p);
+            ram_page_drop(&ewram[0x40000], ewram_page_lo, ewram_page_hi, 0x40000, w * 32 + p);
     iwram_smc_pending = 0;
     memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
     smc_pending = false;

@@ -1,5 +1,5 @@
 @ Self-modifying code test ROM for gpSP (patterns from Mario Golf: Advance Tour).
-@ Results go to EWRAM 0x02000000: [0] = 0x600DF00D when done, [1..11] = checksums.
+@ Results go to EWRAM 0x02000000: [0] = 0x600DF00D when done, [1..9] = checksums.
 @ The dynarec must give exactly the interpreter's results.
 
     .syntax unified
@@ -50,6 +50,8 @@ round:
     bl testH
     bl testI
     bl testJ
+    bl testK
+    bl testL
     subs r11, r11, #1
     bne round
 
@@ -285,6 +287,50 @@ testJ:
     pop {r4, lr}
     bx lr
 
+@ K: a buffer that held code is reused for data: copy a routine in by DMA,
+@ run it, then write 256 words of data over the same buffer (many games
+@ use one IWRAM area for code overlays and work data)
+testK:
+    push {r4, r5, lr}
+    mov r4, #0
+1:  ldr r0, =0x040000D4
+    ldr r1, =__load_start_ovA
+    str r1, [r0]
+    ldr r1, =OVL
+    str r1, [r0, #4]
+    ldr r1, =0x84000000 | 16
+    str r1, [r0, #8]
+    mov r0, r4
+    ldr r12, =OVL
+    mov lr, pc
+    bx r12
+    accum 12
+    ldr r1, =OVL                    @ now data over the old code
+    mov r2, #256
+2:  str r4, [r1], #4
+    subs r2, r2, #1
+    bne 2b
+    ldr r1, =OVL
+    ldr r0, [r1, #128]
+    accum 12
+    add r4, r4, #1
+    cmp r4, #40
+    blo 1b
+    pop {r4, r5, lr}
+    bx lr
+
+@ L: no code changes; an IWRAM loop calls a small IWRAM routine in another
+@ page many times (cost of calls between RAM blocks)
+testL:
+    push {r4, lr}
+    mov r0, #0
+    ldr r12, =callerL
+    mov lr, pc
+    bx r12
+    accum 13
+    pop {r4, lr}
+    bx lr
+
     .ltorg
 
 @ ---------------------------------------------------------------- IWRAM
@@ -394,6 +440,23 @@ patchJX:
 jY:                                 @ first word of the next page
     sub r0, r0, #0
     eor r0, r0, #0x77
+    bx lr
+
+    .align 10
+callerL:                            @ 2000 calls to calleeL
+    push {r4, lr}
+    ldr r4, =2000
+1:  bl calleeL
+    subs r4, r4, #1
+    bne 1b
+    pop {r4, lr}
+    bx lr
+    .ltorg
+    .align 10
+    .space 128
+calleeL:
+    add r0, r0, #3
+    eor r0, r0, r0, lsr #5
     bx lr
 
     .align 10
