@@ -1348,23 +1348,35 @@ static void trace_instruction(u32 pc, u32 mode)
     ARM_ORR_REG_IMMSHIFT(0, reg_a2, reg_a2, ARMREG_LR, ARMSHIFT_ASR, 31);
 #endif
 
+/* Calls through the memory handler tables. The handlers return with "bx lr"
+ * (the CPU predicts that return), to a branch over the word after it, which
+ * holds the GBA PC (read by the slow paths at [lr, #4]). Calls without that
+ * word (the _safe stores inside a store-multiple) return straight after. */
+#define generate_skip_pc_word()                                               \
+  { write32(0xEA000000); }   /* b over the next word */
+
 #define generate_load_call_byte(tblnum)                                       \
   mem_calc_region(0);                                                         \
   generate_add_imm(reg_a2, (STORE_TBL_OFF + 68*tblnum + 4) >> 2, 0);          \
   ARM_LDR_REG_REG_SHIFT(0, reg_a2, reg_base, reg_a2, 0, 2);                   \
   ARM_BLX(0, reg_a2);                                                         \
+  generate_skip_pc_word();                                                    \
 
 #define generate_load_call_mbyte(tblnum, abits)                               \
   mem_calc_region(abits);                                                     \
   generate_add_imm(reg_a2, (STORE_TBL_OFF + 68*tblnum + 4) >> 2, 0);          \
   ARM_LDR_REG_REG_SHIFT(0, reg_a2, reg_base, reg_a2, 0, 2);                   \
   ARM_BLX(0, reg_a2);                                                         \
+  generate_skip_pc_word();                                                    \
 
 #define generate_store_call(tblnum)                                           \
   mem_calc_region(0);                                                         \
   generate_add_imm(reg_a2, (STORE_TBL_OFF + 68*tblnum + 4) >> 2, 0);          \
   ARM_LDR_REG_REG_SHIFT(0, reg_a2, reg_base, reg_a2, 0, 2);                   \
   ARM_BLX(0, reg_a2);                                                         \
+  if (tblnum != 3) {                                                          \
+    generate_skip_pc_word();                                                  \
+  }                                                                           \
 
 
 #define generate_store_call_u8()        generate_store_call(0)
