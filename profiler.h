@@ -24,6 +24,7 @@ extern prof_t prof_video;    /* update_scanline: GBA drawing      */
 extern prof_t prof_sound;    /* render_gbc_sound (sound mixing)   */
 extern prof_t prof_xlate;    /* dynarec translating new blocks    */
 extern prof_t prof_vram;     /* interpreting code run from VRAM   */
+extern prof_t prof_smc;      /* dropping RAM code that was written over, and finding old translations of it */
 extern u32 prof_ram_flushes; /* RAM translation cache flushes     */
 extern u32 prof_ram_reused;  /* RAM translations used again        */
 extern u32 prof_ram_pages;   /* RAM code pages dropped by writes  */

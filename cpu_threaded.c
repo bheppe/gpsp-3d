@@ -2506,12 +2506,15 @@ void translate_icache_sync() {
  * patch their own IWRAM routines and copy code overlays in many times per
  * frame). For each page: the lowest start and the highest end of the
  * blocks that reach into it, so blocks that run across pages go too. */
-#define RAM_PAGE_SHIFT 10
+/* 256-byte pages: a write drops fewer blocks that it didn't touch (each
+ * has to be looked up again, and the sound mixers many games run from
+ * IWRAM keep variables between their instructions) */
+#define RAM_PAGE_SHIFT 8
 #define IWRAM_PAGES    (0x8000 >> RAM_PAGE_SHIFT)
 #define EWRAM_PAGES    (0x40000 >> RAM_PAGE_SHIFT)
 static u32 iwram_page_lo[IWRAM_PAGES], ewram_page_lo[EWRAM_PAGES];
 static u32 iwram_page_hi[IWRAM_PAGES], ewram_page_hi[EWRAM_PAGES];
-static u32 iwram_smc_pending, ewram_smc_pending[EWRAM_PAGES / 32];
+static u32 iwram_smc_pending[IWRAM_PAGES / 32], ewram_smc_pending[EWRAM_PAGES / 32];
 static bool smc_pending;
 /* tags of dropped blocks, used again for new ones (there are only ~16K) */
 static u16 free_tags[0x4000];
@@ -2523,7 +2526,7 @@ static void ram_pages_reset(void)
   memset(ewram_page_lo, 0xFF, sizeof(ewram_page_lo));
   memset(iwram_page_hi, 0, sizeof(iwram_page_hi));
   memset(ewram_page_hi, 0, sizeof(ewram_page_hi));
-  iwram_smc_pending = 0;
+  memset(iwram_smc_pending, 0, sizeof(iwram_smc_pending));
   memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
   smc_pending = false;
   free_tag_n = 0;
@@ -2564,6 +2567,7 @@ typedef struct
   u32 cache_off;    /* where its translation is */
   u32 bytes_off;    /* its copy in ram_reuse_pool */
   u32 next;         /* index + 1 of the next one in the bucket, 0 = none */
+  u32 hash;         /* of its GBA code (compared before the code itself) */
 } ram_reuse_type;
 static ram_reuse_type ram_reuse[REUSE_MAX];
 static u32 ram_reuse_head[REUSE_BUCKETS];
@@ -2665,6 +2669,15 @@ static inline const u8 *ram_code_bytes(u32 a)
   return (a >> 24) == 0x02 ? &ewram[a & 0x3FFFF] : &iwram[0x8000 + (a & 0x7FFF)];
 }
 
+static u32 ram_code_hash(const u8 *p, u32 len)
+{
+  const u16 *h16 = (const u16*)p;
+  u32 h = 2166136261u, i;
+  for (i = 0; i < len / 2; i++)
+    h = (h ^ h16[i]) * 16777619u;
+  return h;
+}
+
 /* a RAM block was translated at cache_off from [start, end) */
 static void ram_reuse_add(u32 key, u32 start, u32 end, u32 cache_off)
 {
@@ -2681,6 +2694,7 @@ static void ram_reuse_add(u32 key, u32 start, u32 end, u32 cache_off)
   r->cache_off = cache_off;
   r->bytes_off = ram_reuse_pool_n;
   r->next = ram_reuse_head[b];
+  r->hash = ram_code_hash(ram_code_bytes(start), len);
   memcpy(&ram_reuse_pool[ram_reuse_pool_n], ram_code_bytes(start), len);
   ram_reuse_pool_n += (len + 3) & ~3U;
   ram_reuse_head[b] = ++ram_reuse_n;
@@ -2690,14 +2704,41 @@ static void ram_reuse_add(u32 key, u32 start, u32 end, u32 cache_off)
  * marks and page ranges are set as translating it would have. */
 static u32 ram_reuse_find(u32 pc, u32 thumb)
 {
-  u32 key = pc | thumb, i = ram_reuse_head[ram_reuse_bucket(key)], n = 0;
+  u32 key = pc | thumb, b = ram_reuse_bucket(key);
+  u32 i = ram_reuse_head[b], prev = 0, n = 0;
   const u8 *src = ram_code_bytes(pc);
   u32 lim = (pc >> 24) == 0x02 ? 0x40000 : 0x8000;
+  u32 hlen = 0, h = 0;   /* hash of the code now at pc, for one length */
   while (i && n++ < REUSE_CHAIN)
   {
     ram_reuse_type *r = &ram_reuse[i - 1];
-    if (r->key == key && (pc & (lim - 1)) + r->len <= lim &&
-        !memcmp(src, &ram_reuse_pool[r->bytes_off], r->len))
+    if (r->key == key && (pc & (lim - 1)) + r->len <= lim)
+    {
+      if (r->len != hlen)
+      {
+        hlen = r->len;
+        h = ram_code_hash(src, hlen);
+      }
+      if (r->hash != h || memcmp(src, &ram_reuse_pool[r->bytes_off], r->len))
+      {
+        prev = i;
+        i = r->next;
+        continue;
+      }
+    }
+    else
+    {
+      prev = i;
+      i = r->next;
+      continue;
+    }
+    if (prev)
+    {
+      /* move to the front: the versions in use are found first */
+      ram_reuse[prev - 1].next = r->next;
+      r->next = ram_reuse_head[b];
+      ram_reuse_head[b] = i;
+    }
     {
       u8 *smc = (pc >> 24) == 0x02 ? &ewram[0x40000] : iwram;
       u32 s = pc & (lim - 1), e = s + r->len, a;
@@ -2747,7 +2788,7 @@ void smc_note_write(u32 address)
     if (ew)
       ewram_smc_pending[p >> 5] |= 1u << (p & 31);
     else
-      iwram_smc_pending |= 1u << p;
+      iwram_smc_pending[p >> 5] |= 1u << (p & 31);
     if (!p || (off & ((1 << RAM_PAGE_SHIFT) - 1)) >= 64 || off >> RAM_PAGE_SHIFT != p)
       break;
     p--;
@@ -2998,7 +3039,10 @@ static bool process_deferred_exits(void)
 #ifdef HAVE_RAM_PAGE_INVALIDATE
 #define RAM_REUSE_TRY(type)                                                   \
         if (!translate_depth) {                                               \
-          u32 old = ram_reuse_find(pc, thumb);                                \
+          u32 old;                                                            \
+          PROF_BEGIN(t_re);                                                   \
+          old = ram_reuse_find(pc, thumb);                                    \
+          PROF_END(t_re, prof_smc);                                           \
           if (old) {                                                          \
             trentry->offset_##type = old;                                     \
             return &ram_translation_cache[old];                               \
@@ -3931,17 +3975,21 @@ void flush_translation_cache_ram(void)
   if (smc_pending && ram_block_tag > RAM_TAG_LOW + 0x400)
   {
     u32 p, w;
-    for (p = 0; p < IWRAM_PAGES; p++)
-      if (iwram_smc_pending & (1u << p))
-        ram_page_drop(iwram, iwram_page_lo, iwram_page_hi, 0x8000, p);
+    PROF_BEGIN(t_drop);
+    for (w = 0; w < IWRAM_PAGES / 32; w++)
+      if (iwram_smc_pending[w])
+        for (p = 0; p < 32; p++)
+          if (iwram_smc_pending[w] & (1u << p))
+            ram_page_drop(iwram, iwram_page_lo, iwram_page_hi, 0x8000, w * 32 + p);
     for (w = 0; w < EWRAM_PAGES / 32; w++)
       if (ewram_smc_pending[w])
         for (p = 0; p < 32; p++)
           if (ewram_smc_pending[w] & (1u << p))
             ram_page_drop(&ewram[0x40000], ewram_page_lo, ewram_page_hi, 0x40000, w * 32 + p);
-    iwram_smc_pending = 0;
+    memset(iwram_smc_pending, 0, sizeof(iwram_smc_pending));
     memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
     smc_pending = false;
+    PROF_END(t_drop, prof_smc);
 #ifdef GPSP_PROFILE
     PROF_FLUSH_CAUSE(PROF_FL_STORE, 0);
 #endif
