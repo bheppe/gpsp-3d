@@ -18,6 +18,7 @@
  */
 
 #include "common.h"
+#include "profiler.h"
 #include "streams/file_stream.h"
 
 /* Sound */
@@ -2115,7 +2116,10 @@ const dma_region_type dma_region_map[17] =
   address##tfsize(iwram + 0x8000, type##_ptr & 0x7FFF) =                      \
                                           eswap##tfsize(read_value);          \
   if (address##tfsize(iwram, type##_ptr & 0x7FFF))                            \
+  {                                                                           \
+    PROF_FLUSH_CAUSE(PROF_FL_DMA, 0x03000000 | (type##_ptr & 0x7FFF));        \
     alerts |= CPU_ALERT_SMC;                                                  \
+  }                                                                           \
 
 #define dma_write_vram(type, tfsize) {                                        \
   u32 wraddr = type##_ptr & 0x1FFFF;                                          \
@@ -2139,7 +2143,10 @@ const dma_region_type dma_region_map[17] =
 #define dma_write_ewram(type, tfsize)                                         \
   address##tfsize(ewram, type##_ptr & 0x3FFFF) = eswap##tfsize(read_value);   \
   if (address##tfsize(ewram, (type##_ptr & 0x3FFFF) + 0x40000))               \
+  {                                                                           \
+    PROF_FLUSH_CAUSE(PROF_FL_DMA, 0x02000000 | (type##_ptr & 0x3FFFF));       \
     alerts |= CPU_ALERT_SMC;                                                  \
+  }                                                                           \
 
 #define print_line()                                                          \
   dma_print(src_op, dest_op, tfsize);                                         \

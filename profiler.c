@@ -41,6 +41,35 @@ static u32 frames, windows;
 static struct { u32 key; u32 count; } hot[PROF_HOT_SIZE];
 static u32 hot_total;
 
+/* where RAM flushes came from (per log period): writer PC, count, and the
+ * RAM code ranges the last one threw away */
+#define PROF_FLUSH_SRC 6
+static struct { u32 key, cause, addr, count, iw_lo, iw_hi, ew_lo, ew_hi; } flush_src[PROF_FLUSH_SRC];
+static u32 flush_src_other, flush_log_total, flush_by_cause[PROF_FL_CAUSES];
+u32 prof_flush_cause, prof_flush_addr;
+static const char *const flush_cause_name[PROF_FL_CAUSES] = {
+   "CPU store over code", "DMA over code", "code run from VRAM", "RAM code cache full" };
+
+void prof_note_ram_flush(u32 pc, u32 thumb, u32 iw_lo, u32 iw_hi, u32 ew_lo, u32 ew_hi)
+{
+   u32 key = (pc & ~1U) | (thumb & 1), i;
+   u32 cause = prof_flush_cause < PROF_FL_CAUSES ? prof_flush_cause : PROF_FL_STORE;
+   flush_log_total++;
+   flush_by_cause[cause]++;
+   for (i = 0; i < PROF_FLUSH_SRC; i++)
+      if ((flush_src[i].key == key && flush_src[i].cause == cause) || !flush_src[i].count)
+      {
+         flush_src[i].key = key;
+         flush_src[i].cause = cause;
+         flush_src[i].addr = prof_flush_addr;
+         flush_src[i].count++;
+         flush_src[i].iw_lo = iw_lo; flush_src[i].iw_hi = iw_hi;
+         flush_src[i].ew_lo = ew_lo; flush_src[i].ew_hi = ew_hi;
+         return;
+      }
+   flush_src_other++;
+}
+
 static retro_environment_t prof_env;
 static char log_path[1024];
 
@@ -131,6 +160,39 @@ static void write_log(float cpu, float gfx, float snd, float jit,
          cpu, gfx, snd, jit, out, aud, wait, halt_pct,
          prof_ram_flushes, prof_rom_flushes);
 
+   /* RAM flushes since the last entry: which GBA code wrote over translated
+    * code, and how much RAM code there was to throw away */
+   if (flush_log_total)
+   {
+      fprintf(f, "  ram flushes in the last %u frames: %u (store %u, dma %u, vram %u, full %u)\n",
+            PROF_WINDOW * PROF_LOG_EVERY, flush_log_total,
+            flush_by_cause[PROF_FL_STORE], flush_by_cause[PROF_FL_DMA],
+            flush_by_cause[PROF_FL_VRAM], flush_by_cause[PROF_FL_FULL]);
+      for (i = 0; i < PROF_FLUSH_SRC && flush_src[i].count; i++)
+      {
+         u32 pc = flush_src[i].key & ~1U, thumb = flush_src[i].key & 1, a;
+         fprintf(f, "  flush (%s, addr %08X) at %08X %s x%u, iwram code %X-%X ewram code %X-%X:",
+               flush_cause_name[flush_src[i].cause], flush_src[i].addr,
+               pc, thumb ? "T" : "A", flush_src[i].count,
+               flush_src[i].iw_lo, flush_src[i].iw_hi, flush_src[i].ew_lo, flush_src[i].ew_hi);
+         if (code_region(pc))
+         {
+            if (thumb)
+               for (a = pc - 8; a < pc + 16; a += 2)
+                  fprintf(f, " %04X", read_memory16(a) & 0xFFFF);
+            else
+               for (a = pc - 8; a < pc + 16; a += 4)
+                  fprintf(f, " %08X", read_memory32(a));
+         }
+         fprintf(f, "\n");
+      }
+      if (flush_src_other)
+         fprintf(f, "  flush from other places x%u\n", flush_src_other);
+      memset(flush_src, 0, sizeof(flush_src));
+      memset(flush_by_cause, 0, sizeof(flush_by_cause));
+      flush_src_other = flush_log_total = 0;
+   }
+
    /* top hot PCs (where update_gba was entered from = loop/branch targets) */
    for (n = 0; n < PROF_HOT_REPORT; n++)
    {
@@ -186,8 +248,10 @@ void prof_frame_end(void)
       u32 halt_pct = (u32)((unsigned long long)prof_halt_cycles * 100 / ((unsigned long long)GBA_FRAME_CYCLES * frames));
       char msg[128];
 
-      snprintf(msg, sizeof(msg), "cpu%.1f gfx%.1f snd%.1f jit%.1f out%.1f aud%.1f wait%.1f halt%u%% fl%u/%u",
-            cpu, gfx, snd, jit, out, aud, wait, halt_pct, prof_ram_flushes, prof_rom_flushes);
+      /* most telling first: the 3DS stats panel shows about 38 characters
+       * (fl = RAM / ROM translation cache flushes in the last 60 frames) */
+      snprintf(msg, sizeof(msg), "jit%.1f fl%u/%u cpu%.1f gfx%.1f snd%.1f out%.1f aud%.1f wait%.1f halt%u%%",
+            jit, prof_ram_flushes, prof_rom_flushes, cpu, gfx, snd, out, aud, wait, halt_pct);
       if (prof_env)
       {
          struct retro_message m = { msg, 90 };

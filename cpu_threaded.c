@@ -3238,7 +3238,10 @@ bool translate_block_arm(u32 pc, bool ram_region)
 
     if(translation_ptr > translation_cache_limit) {
       if (ram_region)
+      {
+        PROF_FLUSH_CAUSE(PROF_FL_FULL, pc);
         flush_translation_cache_ram();
+      }
       else
         flush_translation_cache_rom();
       return false;
@@ -3385,7 +3388,10 @@ bool translate_block_thumb(u32 pc, bool ram_region)
     if(translation_ptr > translation_cache_limit)
     {
       if (ram_region)
+      {
+        PROF_FLUSH_CAUSE(PROF_FL_FULL, pc);
         flush_translation_cache_ram();
+      }
       else
         flush_translation_cache_rom();
       return false;
@@ -3451,6 +3457,9 @@ void flush_translation_cache_ram(void)
   flush_ram_count++;
 #ifdef GPSP_PROFILE
   prof_ram_flushes++;
+  prof_note_ram_flush(reg[REG_PC], (reg[REG_CPSR] >> 5) & 1,
+                      iwram_code_min, iwram_code_max, ewram_code_min, ewram_code_max);
+  PROF_FLUSH_CAUSE(PROF_FL_STORE, 0);
 #endif
   /*printf("ram flush %d (pc %x), %x to %x, %x to %x\n",
    flush_ram_count, reg[REG_PC], iwram_code_min, iwram_code_max,

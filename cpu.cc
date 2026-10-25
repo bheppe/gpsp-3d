@@ -20,6 +20,7 @@
 extern "C" {
   #include "common.h"
   #include "cpu_instrument.h"
+  #include "profiler.h"
 }
 
 const u8 bit_count[256] =
@@ -3595,6 +3596,9 @@ u32 function_cc execute_arm_vram(u32 cycles)
   /* VRAM instructions are never cached. This also covers code rewritten by
    * scalar stores, store-multiple instructions, DMA and mirrored addresses. */
   u32 result;
+#ifdef GPSP_PROFILE
+  u32 vram_pc = reg[REG_PC];
+#endif
   if ((s32)cycles <= 0) {
     result = update_gba(cycles);
     if (!completed_frame(result) && (reg[REG_PC] >> 24) == 0x06)
@@ -3605,6 +3609,7 @@ u32 function_cc execute_arm_vram(u32 cycles)
 #ifdef HAVE_DYNAREC
   /* Interpreted routines may write I/EWRAM without the JIT's SMC handlers.
    * Discard those translations before returning to compiled execution. */
+  PROF_FLUSH_CAUSE(PROF_FL_VRAM, vram_pc);
   flush_translation_cache_ram();
 #endif
   return result;

@@ -28,6 +28,15 @@ extern u32 prof_rom_flushes; /* ROM translation cache flushes     */
 extern u32 prof_halt_cycles; /* GBA cycles spent halted/sleeping  */
 
 void prof_sample_pc(u32 pc, u32 cpsr);
+/* Why the next RAM translation cache flush happens (set just before it by
+ * the code that asks for it; a flush without a cause came from a CPU store
+ * over translated code), and an address that goes with it. */
+enum { PROF_FL_STORE, PROF_FL_DMA, PROF_FL_VRAM, PROF_FL_FULL, PROF_FL_CAUSES };
+extern u32 prof_flush_cause, prof_flush_addr;
+#define PROF_FLUSH_CAUSE(c, a) do { prof_flush_cause = (c); prof_flush_addr = (a); } while (0)
+/* a RAM translation cache flush: the GBA PC at the time, the cause, and the
+ * RAM code ranges thrown away */
+void prof_note_ram_flush(u32 pc, u32 thumb, u32 iw_lo, u32 iw_hi, u32 ew_lo, u32 ew_hi);
 void prof_frame_begin(void);
 void prof_mark_emu_done(void);
 void prof_mark_audio_done(void);
@@ -42,6 +51,7 @@ void prof_init(void *environ_cb);
 
 #define PROF_BEGIN(var)    do {} while (0)
 #define PROF_END(var, acc) do {} while (0)
+#define PROF_FLUSH_CAUSE(c, a) do {} while (0)
 #define prof_sample_pc(pc, cpsr) do {} while (0)
 
 #endif
