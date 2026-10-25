@@ -3755,6 +3755,18 @@ static void ram_page_drop(u8 *smc, u32 *lo, u32 *hi, u32 size, u32 p)
 }
 #endif
 
+void flush_translation_cache_ram_after_interp(void)
+{
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+  /* the interpreter's writes over translated code were noted (write_memory
+   * and DMA call smc_note_write); nothing to do if there were none */
+  if (smc_pending)
+    flush_translation_cache_ram();
+#else
+  flush_translation_cache_ram_full();
+#endif
+}
+
 void flush_translation_cache_ram(void)
 {
 #ifdef HAVE_RAM_PAGE_INVALIDATE

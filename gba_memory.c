@@ -1765,17 +1765,30 @@ void function_cc write_gpio(u32 address, u32 value) {
 
 #define write_gpio32()                                                        \
 
+/* Writes that don't come from translated code (the interpreter running code
+ * from VRAM, BIOS calls): if they hit translated RAM code, note its page so
+ * the dynarec drops it (its SMC area marks code). */
+#ifdef HAVE_DYNAREC
+#define write_ram_smc_check(smc_area, offset, address)                       \
+  if (address32(smc_area, (offset) & ~3U))                                    \
+    smc_note_write(address)
+#else
+#define write_ram_smc_check(smc_area, offset, address)
+#endif
+
 #define write_memory(type)                                                    \
   switch(address >> 24)                                                       \
   {                                                                           \
     case 0x02:                                                                \
       /* external work RAM */                                                 \
       address##type(ewram, (address & 0x3FFFF)) = eswap##type(value);         \
+      write_ram_smc_check(ewram, (address & 0x3FFFF) + 0x40000, address);     \
       break;                                                                  \
                                                                               \
     case 0x03:                                                                \
       /* internal work RAM */                                                 \
       address##type(iwram, (address & 0x7FFF) + 0x8000) = eswap##type(value); \
+      write_ram_smc_check(iwram, address & 0x7FFF, address);                  \
       break;                                                                  \
                                                                               \
     case 0x04:                                                                \

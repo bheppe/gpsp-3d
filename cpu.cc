@@ -3596,9 +3596,7 @@ u32 function_cc execute_arm_vram(u32 cycles)
   /* VRAM instructions are never cached. This also covers code rewritten by
    * scalar stores, store-multiple instructions, DMA and mirrored addresses. */
   u32 result;
-#ifdef GPSP_PROFILE
-  u32 vram_pc = reg[REG_PC];
-#endif
+  PROF_BEGIN(t_vram);
   if ((s32)cycles <= 0) {
     result = update_gba(cycles);
     if (!completed_frame(result) && (reg[REG_PC] >> 24) == 0x06)
@@ -3607,11 +3605,14 @@ u32 function_cc execute_arm_vram(u32 cycles)
     result = execute_arm_internal(cycles, true);
   }
 #ifdef HAVE_DYNAREC
-  /* Interpreted routines may write I/EWRAM without the JIT's SMC handlers.
-   * Discard those translations before returning to compiled execution. */
-  PROF_FLUSH_CAUSE(PROF_FL_VRAM, vram_pc);
-  flush_translation_cache_ram_full();
+  /* Interpreted routines don't go through the JIT's SMC handlers; their
+   * writes over translated RAM code were noted by write_memory. Drop that
+   * code before returning to compiled execution (only that code: games
+   * like the Super Mario Galaxy GBA port call VRAM code hundreds of times a
+   * second, and dropping all RAM code each time cost up to 12 ms a frame). */
+  flush_translation_cache_ram_after_interp();
 #endif
+  PROF_END(t_vram, prof_vram);
   return result;
 }
 

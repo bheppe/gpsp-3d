@@ -1,5 +1,5 @@
 @ Self-modifying code test ROM for gpSP (patterns from Mario Golf: Advance Tour).
-@ Results go to EWRAM 0x02000000: [0] = 0x600DF00D when done, [1..14] = checksums.
+@ Results go to EWRAM 0x02000000: [0] = 0x600DF00D when done, [1..15] = checksums.
 @ The dynarec must give exactly the interpreter's results.
 
     .syntax unified
@@ -53,6 +53,7 @@ round:
     bl testK
     bl testL
     bl testM
+    bl testN
     subs r11, r11, #1
     bne round
 
@@ -332,6 +333,42 @@ testL:
     pop {r4, lr}
     bx lr
 
+@ N: a routine copied into VRAM (run by gpSP's interpreter) patches an
+@ IWRAM routine, which is then called (like the Super Mario Galaxy port,
+@ which calls code in VRAM from its interrupt handler)
+testN:
+    push {r4, lr}
+    ldr r0, =vramN_start
+    ldr r1, =0x06017000
+    ldr r2, =vramN_end
+    sub r2, r2, r0
+    add r2, r2, r1
+    bl copy
+    mov r4, #0
+1:  mov r0, r4
+    ldr r12, =0x06017000
+    mov lr, pc
+    bx r12
+    mov r0, #5
+    ldr r12, =calleeN
+    mov lr, pc
+    bx r12
+    accum 15
+    add r4, r4, #3
+    cmp r4, #90
+    blo 1b
+    pop {r4, lr}
+    bx lr
+
+vramN_start:                        @ copied to VRAM: patches patchN with r0
+    ldr r1, =0xE2800000             @ add r0, r0, #imm
+    orr r1, r1, r0
+    ldr r2, =patchN
+    str r1, [r2]
+    bx lr
+    .ltorg
+vramN_end:
+
 @ M: like E (a block across a page boundary, patched in its second page),
 @ but switched back and forth between two versions, so the dynarec can use
 @ its old translations again. A reused block must be dropped like a newly
@@ -415,6 +452,12 @@ calleeH:
 patchH:
     add r0, r0, #0
     mov r0, r0, ror #3
+    bx lr
+
+calleeN:
+patchN:
+    add r0, r0, #0
+    mov r0, r0, ror #5
     bx lr
 
     .align 10

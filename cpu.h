@@ -179,6 +179,9 @@ void flush_translation_cache_ram(void);
 void flush_translation_cache_ram_full(void);
 /* A write hit translated RAM code at this GBA address. */
 void smc_note_write(u32 address);
+/* After running code from VRAM in the interpreter: drops the RAM code its
+ * writes hit (all RAM code where the dynarec can't drop single pages). */
+void flush_translation_cache_ram_after_interp(void);
 void dump_translation_cache(void);
 void init_dynarec_caches(void);
 void flush_dynarec_caches(void);
