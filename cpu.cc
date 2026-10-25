@@ -1381,11 +1381,14 @@ inline cpu_alert_type exec_thumb_block_mem(u32 rn, u32 reglist, s32 &cycles_rema
   cycles_remaining -= ws_cyc_nseq[reg[REG_PC] >> 24][0];                      \
 }                                                                             \
 
-// When a mode change occurs from non-FIQ to non-FIQ retire the current
-// reg[13] and reg[14] into reg_mode[cpu_mode][5] and reg_mode[cpu_mode][6]
-// respectively and load into reg[13] and reg[14] reg_mode[new_mode][5] and
-// reg_mode[new_mode][6]. When swapping to/from FIQ retire/load reg[8]
-// through reg[14] to/from reg_mode[MODE_FIQ][0] through reg_mode[MODE_FIQ][6].
+// On a mode change r13 and r14 are retired into reg_mode[cpu_mode][5..6]
+// and loaded from reg_mode[new_mode][5..6]. r8 to r12 belong to FIQ mode
+// alone: every other mode shares the user mode's, kept in
+// reg_mode[MODE_USER][0..4] while FIQ mode runs. So they are only swapped
+// when entering or leaving FIQ mode. (Storing them per mode made an IRQ
+// taken in FIQ mode load the IRQ bank's never-written r8-r12, and the FIQ
+// code then got those back: OpenLara's rasterizers run in FIQ mode with
+// IRQs on and crashed, leaving a black screen.)
 
 const u32 cpu_modes[16] =
 {
@@ -1407,27 +1410,22 @@ void set_cpu_mode(cpu_mode_type new_mode)
   if(cpu_mode == new_mode)
      return;
 
-  if(new_mode == MODE_FIQ)
+  REG_MODE(cpu_mode)[5] = reg[REG_SP];
+  REG_MODE(cpu_mode)[6] = reg[REG_LR];
+
+  if((cpu_mode == MODE_FIQ) != (new_mode == MODE_FIQ))
   {
-     for (u32 i = 8; i < 15; i++)
-        REG_MODE(cpu_mode)[i - 8] = reg[i];
-  }
-  else
-  {
-     REG_MODE(cpu_mode)[5] = reg[REG_SP];
-     REG_MODE(cpu_mode)[6] = reg[REG_LR];
+     u32 *out = REG_MODE(cpu_mode == MODE_FIQ ? MODE_FIQ : MODE_USER);
+     u32 *in  = REG_MODE(new_mode == MODE_FIQ ? MODE_FIQ : MODE_USER);
+     for (u32 i = 0; i < 5; i++)
+     {
+        out[i] = reg[8 + i];
+        reg[8 + i] = in[i];
+     }
   }
 
-  if(cpu_mode == MODE_FIQ)
-  {
-     for (u32 i = 8; i < 15; i++)
-        reg[i] = REG_MODE(new_mode)[i - 8];
-  }
-  else
-  {
-     reg[REG_SP] = REG_MODE(new_mode)[5];
-     reg[REG_LR] = REG_MODE(new_mode)[6];
-  }
+  reg[REG_SP] = REG_MODE(new_mode)[5];
+  reg[REG_LR] = REG_MODE(new_mode)[6];
 
   reg[CPU_MODE] = new_mode;
 }
