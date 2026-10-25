@@ -1,5 +1,5 @@
 @ Self-modifying code test ROM for gpSP (patterns from Mario Golf: Advance Tour).
-@ Results go to EWRAM 0x02000000: [0] = 0x600DF00D when done, [1..15] = checksums.
+@ Results go to EWRAM 0x02000000: [0] = 0x600DF00D when done, [1..16] = checksums.
 @ The dynarec must give exactly the interpreter's results.
 
     .syntax unified
@@ -33,7 +33,7 @@ reset:
     @ clear results
     ldr r0, =RES
     mov r1, #0
-    mov r2, #16
+    mov r2, #20
 1:  str r1, [r0], #4
     subs r2, r2, #1
     bne 1b
@@ -54,6 +54,7 @@ round:
     bl testL
     bl testM
     bl testN
+    bl testO
     subs r11, r11, #1
     bne round
 
@@ -368,6 +369,65 @@ vramN_start:                        @ copied to VRAM: patches patchN with r0
     bx lr
     .ltorg
 vramN_end:
+
+@ O: code in VRAM changed by plain stores between calls (VRAM writes are
+@ not checked for code, so a translation of VRAM code must notice that the
+@ code is different), with a loop and a call to a second VRAM routine
+testO:
+    push {r4, r5, lr}
+    ldr r0, =vramO_start
+    ldr r1, =0x06017400
+    ldr r2, =vramO_end
+    sub r2, r2, r0
+    add r2, r2, r1
+    bl copy
+    ldr r5, =vramO_patch
+    ldr r0, =vramO_start
+    sub r5, r5, r0
+    ldr r0, =0x06017400
+    add r5, r5, r0
+    mov r4, #0
+1:  ldr r1, =0xE2800000             @ add r0, r0, #imm
+    and r2, r4, #7
+    orr r1, r1, r2
+    str r1, [r5]                    @ a plain store into VRAM code
+    ldr r1, =0xE2800000             @ and the called routine, separately
+    mov r2, r4, lsr #1
+    and r2, r2, #15
+    orr r1, r1, r2
+    ldr r2, =vramO_sub_patch
+    ldr r0, =vramO_patch
+    sub r2, r2, r0
+    str r1, [r5, r2]
+    mov r0, r4
+    ldr r12, =0x06017400
+    mov lr, pc
+    bx r12
+    accum 16
+    add r4, r4, #1
+    cmp r4, #100
+    blo 1b
+    pop {r4, r5, lr}
+    bx lr
+
+vramO_start:                        @ r0: 10 x (patched add; mul-ish), then sub call
+    push {lr}
+    mov r3, #10
+1:
+vramO_patch:
+    add r0, r0, #0
+    add r0, r0, r0, lsl #2
+    subs r3, r3, #1
+    bne 1b
+    bl vramO_sub
+    pop {lr}
+    bx lr
+vramO_sub:
+vramO_sub_patch:
+    add r0, r0, #0
+    eor r0, r0, r0, lsr #3
+    bx lr
+vramO_end:
 
 @ M: like E (a block across a page boundary, patched in its second page),
 @ but switched back and forth between two versions, so the dynarec can use

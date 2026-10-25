@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
     printf("drc=%s frames=%d flushes=%u pages=%u reused=%u time=%.0fms results:", drc, frames, test_flush_total, &prof_ram_pages ? prof_ram_pages : 0,
       &prof_ram_reused ? prof_ram_reused : 0,
       (b.tv_sec - a.tv_sec) * 1e3 + (b.tv_nsec - a.tv_nsec) / 1e6);
-    for (i = 0; i < 16; i++) printf(" %08X", ew ? ew[i] : 0); printf("\n");
+    for (i = 0; i < 17; i++) printf(" %08X", ew ? ew[i] : 0); printf("\n");
     if (getenv("HASH")) { unsigned c = 0, sy = 0; video_thread_counters(&c, &sy); printf("frames=%d hash=%08X vram_copies=%u syncs=%u\n", nframes, fhash, c, sy); } }
   if (argc > 4) { FILE *o = fopen(argv[4], "wb"); int x, y; fprintf(o, "P6 240 160 255\n");
     for (y = 0; y < 160; y++) for (x = 0; x < 240; x++) { uint16_t c = frame[y][x];

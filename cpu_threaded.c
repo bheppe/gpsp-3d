@@ -2492,6 +2492,11 @@ void translate_icache_sync() {
 // 0xXXXX : this is the start of a translated block, starting from 0xFFFF downwards
 //          LSB is always set (we decrement by two) to ensure both bytes != 0
 //
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+#define XL_VRAM xl_vram
+#else
+#define XL_VRAM false
+#endif
 #define CODE_TAG_BLOCK16   0x0101
 #define CODE_TAG_BLOCK32   0x01010101
 
@@ -2566,6 +2571,83 @@ static u32 ram_reuse_n, ram_reuse_pool_n;
 static u8 ram_reuse_pool[REUSE_POOL];
 /* the RAM block translate_block_* scanned last */
 static u32 xl_ram_start, xl_ram_end;
+
+/* Code run from VRAM (the Super Mario Galaxy GBA port decodes animations
+ * with a routine it copies there) is translated into the RAM cache too.
+ * Writes to VRAM are not checked for code (the game draws there all the
+ * time), so each translation keeps a copy of the GBA code it was made from
+ * and is used only while VRAM still holds exactly that code: every entry
+ * into VRAM code comes through a lookup (branches into VRAM are never
+ * linked directly), which compares it. Cleared with a full RAM flush. */
+#define VRAM_CODE_BUCKETS 1024
+#define VRAM_CODE_MAX     4096
+#define VRAM_CODE_POOL    (128 * 1024)
+typedef struct
+{
+  u32 key;          /* pc | thumb */
+  u32 len;
+  u32 cache_off;
+  u32 bytes_off;
+  u32 next;         /* index + 1, 0 = none */
+} vram_code_type;
+static vram_code_type vram_code[VRAM_CODE_MAX];
+static u32 vram_code_head[VRAM_CODE_BUCKETS];
+static u32 vram_code_n, vram_code_pool_n;
+static u8 vram_code_pool[VRAM_CODE_POOL];
+static bool xl_vram;    /* translating VRAM code */
+
+static void vram_code_reset(void)
+{
+  memset(vram_code_head, 0, sizeof(vram_code_head));
+  vram_code_n = vram_code_pool_n = 0;
+}
+
+static inline u32 vram_code_bucket(u32 key)
+{
+  return (key * 2654435761U) >> (32 - 10);
+}
+
+/* VRAM offset of a GBA address (96 KB, the last 32 KB mirrored) */
+static inline u32 vram_code_offset(u32 a)
+{
+  u32 o = a & 0x1FFFF;
+  return o >= 0x18000 ? o - 0x8000 : o;
+}
+
+static u8 *vram_code_find(u32 pc, u32 thumb)
+{
+  u32 key = pc | thumb, i = vram_code_head[vram_code_bucket(key)];
+  u32 o = vram_code_offset(pc);
+  while (i)
+  {
+    vram_code_type *r = &vram_code[i - 1];
+    if (r->key == key && o + r->len <= 0x18000 &&
+        !memcmp(&vram[o], &vram_code_pool[r->bytes_off], r->len))
+      return &ram_translation_cache[r->cache_off];
+    i = r->next;
+  }
+  return NULL;
+}
+
+static void vram_code_add(u32 key, u32 start, u32 end, u32 cache_off)
+{
+  u32 len = end - start, o = vram_code_offset(start), b;
+  vram_code_type *r;
+  if (end <= start || len > 8192 || o + len > 0x18000)
+    return;   /* not kept: translated again on every entry */
+  if (vram_code_n == VRAM_CODE_MAX || vram_code_pool_n + len > VRAM_CODE_POOL)
+    vram_code_reset();
+  b = vram_code_bucket(key);
+  r = &vram_code[vram_code_n];
+  r->key = key;
+  r->len = len;
+  r->cache_off = cache_off;
+  r->bytes_off = vram_code_pool_n;
+  r->next = vram_code_head[b];
+  memcpy(&vram_code_pool[vram_code_pool_n], &vram[o], len);
+  vram_code_pool_n += (len + 3) & ~3U;
+  vram_code_head[b] = ++vram_code_n;
+}
 
 static void ram_reuse_reset(void)
 {
@@ -2796,9 +2878,30 @@ static bool process_deferred_exits(void)
     thumb         = deferred_exits[deferred_exit_count].thumb;
 
 #ifdef HAVE_RAM_PAGE_INVALIDATE
-    /* RAM block -> RAM code: through a lookup stub, never directly into the
-     * other block's translation (which a write may drop on its own) */
-    if(((branch_target >> 24) == 0x02 || (branch_target >> 24) == 0x03) &&
+    /* any block -> VRAM code: through a lookup stub (it checks the code is
+     * still the same), in the source block's own cache */
+    if((branch_target >> 24) == 0x06 &&
+     !(branch_source >= ram_translation_cache &&
+       branch_source < ram_translation_cache + RAM_TRANSLATION_CACHE_SIZE))
+    {
+      u8 *translation_ptr = rom_translation_ptr;
+      if(translation_ptr + RAM_EXIT_STUB_SIZE > rom_translation_cache +
+         ROM_TRANSLATION_CACHE_SIZE - TRANSLATION_CACHE_LIMIT_THRESHOLD)
+      {
+        flush_translation_cache_rom();
+        return false;
+      }
+      translation_target = translation_ptr;
+      generate_ram_exit_stub(branch_target, thumb);
+      rom_translation_ptr = translation_ptr;
+      generate_branch_patch_unconditional(branch_source, translation_target);
+      continue;
+    }
+
+    /* RAM block -> RAM or VRAM code: through a lookup stub, never directly
+     * into the other block's translation (which a write may drop on its own) */
+    if(((branch_target >> 24) == 0x02 || (branch_target >> 24) == 0x03 ||
+        (branch_target >> 24) == 0x06) &&
      branch_source >= ram_translation_cache &&
      branch_source < ram_translation_cache + RAM_TRANSLATION_CACHE_SIZE)
     {
@@ -2851,10 +2954,45 @@ static bool process_deferred_exits(void)
   pc &= ~0x01                                                                 \
 
 
-#ifdef HAVE_VRAM_INTERPRETER
+#if defined(HAVE_VRAM_INTERPRETER) && !defined(HAVE_RAM_PAGE_INVALIDATE)
 #define vram_lookup_region case 0x06:
 #else
 #define vram_lookup_region
+#endif
+
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+#define vram_lookup_translate(type)                                           \
+    case 0x06:                                                                \
+    {                                                                         \
+      u8 *blkptr = vram_code_find(pc, thumb);                                 \
+      u32 vstart, vend;                                                       \
+      bool result;                                                            \
+      if (blkptr)                                                             \
+        return blkptr;                                                        \
+      blkptr = ram_translation_ptr + block_prologue_size;                     \
+      xl_ram_start = xl_ram_end = 0;                                          \
+      PROF_BEGIN(t_xl);                                                       \
+      translate_depth++;                                                      \
+      xl_vram = true;                                                         \
+      result = translate_block_##type(pc, true);                              \
+      xl_vram = false;                                                        \
+      vstart = xl_ram_start;                                                  \
+      vend = xl_ram_end;                                                      \
+      if (result && translate_depth == 1)                                     \
+        result = process_deferred_exits();                                    \
+      translate_depth--;                                                      \
+      if (!translate_depth) PROF_END(t_xl, prof_xlate);                       \
+      if (!result && !translate_depth)                                        \
+        deferred_exit_count = 0;                                              \
+      if (!result)                                                            \
+        return NULL;                                                          \
+      if (!translate_depth && vstart == pc)                                   \
+        vram_code_add(pc | thumb, vstart, vend,                               \
+                      blkptr - ram_translation_cache);                        \
+      return blkptr;                                                          \
+    }
+#else
+#define vram_lookup_translate(type)
 #endif
 
 #ifdef HAVE_RAM_PAGE_INVALIDATE
@@ -2932,6 +3070,8 @@ u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
       }                                                                       \
       return NULL;                                                            \
     }                                                                         \
+                                                                              \
+    vram_lookup_translate(type)                                               \
                                                                               \
     vram_lookup_region                                                        \
     case 0x0:                                                                 \
@@ -3366,7 +3506,7 @@ block_exit_type block_exits[MAX_EXITS];
   pc &= ~0x01                                                                 \
 
 #define update_pc_limits()                                                    \
-if (ram_region) {                                                             \
+if (ram_region && !XL_VRAM) {                                                 \
   if (pc >= 0x3000000) {                                                      \
     iwram_code_min = MIN(pc & 0x7FFF, iwram_code_min);                        \
     iwram_code_max = MAX(pc & 0x7FFF, iwram_code_max);                        \
@@ -3381,7 +3521,7 @@ if (ram_region) {                                                             \
  * must not change reg[PC] while compiling some other block. */
 #ifdef HAVE_VRAM_INTERPRETER
 #define translate_vram_entry(type)                                           \
-  if ((pc >> 24) == 0x06) {                                                  \
+  if ((pc >> 24) == 0x06 && !XL_VRAM) {                                      \
     translation_ptr = rom_translation_ptr;                                   \
     if (translation_ptr > rom_translation_cache + ROM_TRANSLATION_CACHE_SIZE \
                           - TRANSLATION_CACHE_LIMIT_THRESHOLD) {             \
@@ -3442,7 +3582,7 @@ bool translate_block_arm(u32 pc, bool ram_region)
      of the data processing functions can access it), and its expansion was
      massacreing the compiler. */
 
-  if(ram_region)
+  if(ram_region && !XL_VRAM)
   {
     scan_block(arm, yes);
 #ifdef HAVE_RAM_PAGE_INVALIDATE
@@ -3454,6 +3594,13 @@ bool translate_block_arm(u32 pc, bool ram_region)
   else
   {
     scan_block(arm, no);
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+    if (xl_vram)
+    {
+      xl_ram_start = block_start_pc;
+      xl_ram_end = block_end_pc;
+    }
+#endif
   }
 
   for(i = 0; i < block_exit_position; i++)
@@ -3598,7 +3745,7 @@ bool translate_block_thumb(u32 pc, bool ram_region)
      of the data processing functions can access it), and its expansion was
      massacreing the compiler. */
 
-  if(ram_region)
+  if(ram_region && !XL_VRAM)
   {
     scan_block(thumb, yes);
 #ifdef HAVE_RAM_PAGE_INVALIDATE
@@ -3610,6 +3757,13 @@ bool translate_block_thumb(u32 pc, bool ram_region)
   else
   {
     scan_block(thumb, no);
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+    if (xl_vram)
+    {
+      xl_ram_start = block_start_pc;
+      xl_ram_end = block_end_pc;
+    }
+#endif
   }
 
   for(i = 0; i < block_exit_position; i++)
@@ -3803,6 +3957,7 @@ void flush_translation_cache_ram_full(void)
 #ifdef HAVE_RAM_PAGE_INVALIDATE
   ram_pages_reset();
   ram_reuse_reset();
+  vram_code_reset();
 #endif
   flush_ram_count++;
 #ifdef GPSP_PROFILE
@@ -3869,6 +4024,7 @@ void init_dynarec_caches(void)
 #ifdef HAVE_RAM_PAGE_INVALIDATE
   ram_pages_reset();
   ram_reuse_reset();
+  vram_code_reset();
 #endif
 
   ewram_code_min = 0;
