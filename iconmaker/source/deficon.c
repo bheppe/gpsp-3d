@@ -263,13 +263,12 @@ static void background(canvas *c)
    }
 }
 
+/* A custom banner is used as it is: transparent parts stay transparent
+ * (the HOME Menu shows its own background there), and a picture that isn't
+ * 2:1 is fitted with transparent margins. */
 void banner_from_image(const uint8_t *img, int w, int h, uint8_t *rgba256x128)
 {
-   static uint8_t fit[256 * 128 * 4];
-   canvas c = { rgba256x128, 256, 128 };
-   background(&c);
-   image_fit(img, w, h, fit, 256, 128);
-   over(rgba256x128, 256, 0, 0, fit, 256, 128);
+   image_fit(img, w, h, rgba256x128, 256, 128);
 }
 
 void default_banner(const char *name, const uint8_t *icon, int iw, int ih,

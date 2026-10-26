@@ -816,7 +816,7 @@ static void draw_top_game(const game_art *a, bool installed)
 {
    top_bg();
    ui_text(&ui_font_small, 32, 6, "HOME Menu preview", C_DIM, 0);
-   ui_rrect(30, 22, 260, 132, 6, C_FAINT);
+   ui_rrect_outline(30, 22, 260, 132, 6, 1, C_FAINT);
    blit_rgba(a->banner, 256, 128, 32, 24, 1);
 
    ui_rrect(28, 164, 56, 56, 10, C_PANEL);

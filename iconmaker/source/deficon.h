@@ -19,7 +19,8 @@ void default_banner(const char *name, const uint8_t *icon, int iw, int ih,
 /* the name without "(USA)", "[!]" and the like, and with '_' as spaces */
 void clean_name(const char *in, char *out, int n);
 
-/* A 256x128 banner from any picture: fitted, centered on the navy. */
+/* A 256x128 banner from any picture: fitted and centered, transparency kept
+ * (no background added). */
 void banner_from_image(const uint8_t *img, int w, int h, uint8_t *rgba256x128);
 
 #endif
