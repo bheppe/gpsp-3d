@@ -9,6 +9,10 @@
 #
 # Icons: put a 48x48 PNG named like the game next to it (Pokemon Emerald.gba ->
 # Pokemon Emerald.png) for a custom icon; otherwise the gpSP 3D icon is used.
+# Banners (the picture on the top screen when the icon is selected): a 256x128
+# PNG named like the game plus ".banner" (Pokemon Emerald.banner.png), and
+# optionally a short WAV for its sound (Pokemon Emerald.banner.wav); otherwise
+# the gpSP 3D banner, silent.
 # The CIAs go to out/forwarders/. Install them with FBI. gpSP 3D itself must be
 # installed as a CIA.
 set -e
@@ -31,11 +35,12 @@ ELF="$HERE/forwarder/forwarder.elf"
 
 OUT="$HERE/out/forwarders"; TMP="$HERE/build/fwd"
 mkdir -p "$OUT" "$TMP"
-bannertool makebanner -i "$HERE/res/banner.png" -a "$HERE/res/silent.wav" -o "$TMP/banner.bnr" >/dev/null
+bannertool makebanner -i "$HERE/res/banner.png" -a "$HERE/res/silent.wav" -o "$TMP/default.bnr" >/dev/null
 
 n=0
 shopt -s nullglob nocaseglob
 for rom in "$PC_DIR"/*.gba "$PC_DIR"/*.zip; do
+  case "$rom" in *.banner.*) continue ;; esac
   file="$(basename "$rom")"
   name="${file%.*}"
   sdpath="sdmc:$SD_DIR/$file"
@@ -44,13 +49,23 @@ for rom in "$PC_DIR"/*.gba "$PC_DIR"/*.zip; do
   uid=$(printf '0x%05X' $(( 0xC0000 + crc % 0x30000 )))
   icon="$HERE/res/icon.png"
   [ -f "$PC_DIR/$name.png" ] && icon="$PC_DIR/$name.png"
+  banner="$TMP/default.bnr"
+  if [ -f "$PC_DIR/$name.banner.png" ]; then
+    sound="$HERE/res/silent.wav"
+    [ -f "$PC_DIR/$name.banner.wav" ] && sound="$PC_DIR/$name.banner.wav"
+    if bannertool makebanner -i "$PC_DIR/$name.banner.png" -a "$sound" -o "$TMP/game.bnr" >/dev/null; then
+      banner="$TMP/game.bnr"
+    else
+      echo "  ($name.banner.png: not used, it must be a 256x128 PNG; the WAV a short 16-bit one)"
+    fi
+  fi
   rm -rf "$TMP/romfs"; mkdir -p "$TMP/romfs"
   printf '%s\n' "$sdpath" > "$TMP/romfs/path.txt"
   bannertool makesmdh -s "${name:0:63}" -l "${name:0:63} (gpSP 3D)" -p "gpSP 3D" \
     -i "$icon" -o "$TMP/icon.icn" >/dev/null
   safe="$(printf '%s' "$name" | tr -c 'A-Za-z0-9 ._()-' '_')"
   makerom -f cia -o "$OUT/$safe.cia" -rsf "$HERE/forwarder/forwarder.rsf" -exefslogo -elf "$ELF" \
-    -icon "$TMP/icon.icn" -banner "$TMP/banner.bnr" \
+    -icon "$TMP/icon.icn" -banner "$banner" \
     -DAPP_TITLE="gp3dfwd" -DAPP_PRODUCT_CODE="CTR-GP3F" -DAPP_UNIQUE_ID=$uid \
     -DAPP_SYSTEM_MODE=64MB -DAPP_SYSTEM_MODE_EXT=Legacy -DAPP_ENCRYPTED=false \
     -DAPP_ROMFS="$TMP/romfs" >/dev/null

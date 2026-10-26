@@ -97,7 +97,10 @@ into it (a "forwarder"). gpSP 3D must be installed as a CIA.
 3. Install the CIAs from `gpsp3ds/out/forwarders/` with FBI.
 
 For a custom icon, put a 48x48 PNG with the game's name next to it
-(`Pokemon Emerald.gba` -> `Pokemon Emerald.png`). Other forwarder tools that
+(`Pokemon Emerald.gba` -> `Pokemon Emerald.png`). For a custom banner (the
+picture on the top screen when the icon is selected), add a 256x128 PNG named
+like the game plus `.banner` (`Pokemon Emerald.banner.png`), and optionally a
+short WAV for its sound (`Pokemon Emerald.banner.wav`). Other forwarder tools that
 start `gpsp3d.3dsx` with the game's path as its argument also work.
 
 ## Building
