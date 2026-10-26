@@ -2516,6 +2516,11 @@ static u32 iwram_page_lo[IWRAM_PAGES], ewram_page_lo[EWRAM_PAGES];
 static u32 iwram_page_hi[IWRAM_PAGES], ewram_page_hi[EWRAM_PAGES];
 static u32 iwram_smc_pending[IWRAM_PAGES / 32], ewram_smc_pending[EWRAM_PAGES / 32];
 static bool smc_pending;
+/* the RAM addresses written over code since the last drop (up to 32; more
+ * and the pages above are dropped instead) */
+#define SMC_ADDRS 32
+static u32 smc_addrs[SMC_ADDRS];
+static u32 smc_addr_n;
 /* tags of dropped blocks, used again for new ones (there are only ~16K) */
 static u16 free_tags[0x4000];
 static u32 free_tag_n;
@@ -2529,6 +2534,7 @@ static void ram_pages_reset(void)
   memset(iwram_smc_pending, 0, sizeof(iwram_smc_pending));
   memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
   smc_pending = false;
+  smc_addr_n = 0;
   free_tag_n = 0;
 }
 
@@ -2702,7 +2708,7 @@ static void ram_reuse_add(u32 key, u32 start, u32 end, u32 cache_off)
 
 /* An old translation of exactly the code now at pc, or 0. If found, the SMC
  * marks and page ranges are set as translating it would have. */
-static u32 ram_reuse_find(u32 pc, u32 thumb)
+static u32 ram_reuse_find(u32 pc, u32 thumb, u32 *len)
 {
   u32 key = pc | thumb, b = ram_reuse_bucket(key);
   u32 i = ram_reuse_head[b], prev = 0, n = 0;
@@ -2766,6 +2772,7 @@ static u32 ram_reuse_find(u32 pc, u32 thumb)
 #ifdef GPSP_PROFILE
       prof_ram_reused++;
 #endif
+      *len = r->len;
       return r->cache_off;
     }
     i = r->next;
@@ -2780,6 +2787,12 @@ void smc_note_write(u32 address)
   u32 off, p;
   bool ew = (address >> 24) == 0x02;
   off = address & (ew ? 0x3FFFF : 0x7FFF);
+  if (smc_addr_n <= SMC_ADDRS)
+  {
+    if (smc_addr_n < SMC_ADDRS)
+      smc_addrs[smc_addr_n] = address;
+    smc_addr_n++;   /* SMC_ADDRS + 1: too many, drop the pages */
+  }
   p = off >> RAM_PAGE_SHIFT;
   /* the page, and the one before when near its start: a store-multiple is
    * only checked at its last word, the others may lie in the page before */
@@ -2828,6 +2841,8 @@ typedef struct
 {
   u32 offset_arm;     // Cache offset to the ARM-mode compiled block
   u32 offset_thumb;   // Cache offset to the Thumb-mode compiled block
+  u32 end_arm;        // End of each block's GBA code (offset in its RAM;
+  u32 end_thumb;      // ~0 = not known: dropped by any write after its start)
 } ramtag_type;
 
 static u32 ram_block_tag = INITIAL_TOP_TAG;
@@ -3039,19 +3054,24 @@ static bool process_deferred_exits(void)
 #ifdef HAVE_RAM_PAGE_INVALIDATE
 #define RAM_REUSE_TRY(type)                                                   \
         if (!translate_depth) {                                               \
-          u32 old;                                                            \
+          u32 old, rlen;                                                      \
           PROF_BEGIN(t_re);                                                   \
-          old = ram_reuse_find(pc, thumb);                                    \
+          old = ram_reuse_find(pc, thumb, &rlen);                             \
           PROF_END(t_re, prof_smc);                                           \
           if (old) {                                                          \
             trentry->offset_##type = old;                                     \
+            trentry->end_##type = (pc & (pcregion == 2 ? 0x3FFFF : 0x7FFF))   \
+                                  + rlen;                                     \
             return &ram_translation_cache[old];                               \
           }                                                                   \
         }
 #define RAM_REUSE_ADD(type)                                                   \
-          if (!translate_depth && xl_ram_start == pc)                         \
+          if (!translate_depth && xl_ram_start == pc) {                       \
             ram_reuse_add(pc | thumb, xl_ram_start, xl_ram_end,               \
-                          trentry->offset_##type);
+                          trentry->offset_##type);                            \
+            trentry->end_##type = (pc & (pcregion == 2 ? 0x3FFFF : 0x7FFF))   \
+                                  + (xl_ram_end - xl_ram_start);              \
+          }
 #else
 #define RAM_REUSE_TRY(type)
 #define RAM_REUSE_ADD(type)
@@ -3085,6 +3105,8 @@ u8 function_cc *block_lookup_translate_##type(u32 pc)                         \
         trentry = get_ram_tag(*tagp);                                         \
         trentry->offset_arm = 0;                                              \
         trentry->offset_thumb = 0;                                            \
+        trentry->end_arm = ~0U;                                               \
+        trentry->end_thumb = ~0U;                                             \
       } else {                                                                \
         trentry = get_ram_tag(*tagp);                                         \
       }                                                                       \
@@ -3953,6 +3975,46 @@ static void ram_page_drop(u8 *smc, u32 *lo, u32 *hi, u32 size, u32 p)
 }
 #endif
 
+#ifdef HAVE_RAM_PAGE_INVALIDATE
+/* A write at offset a of this RAM hit code: drop only the blocks whose code
+ * covers [a - 60, a + 4) (a store-multiple is checked at its last word only).
+ * Usually one routine patched in place (Mario Golf) or a variable kept in a
+ * routine (sound mixers), so the blocks around it stay. If no block covers
+ * the write, the "code here" marks there are stale (data written over old
+ * code): the page goes, as before, so those writes stop trapping. Returns
+ * false then. */
+static bool ram_drop_blocks_at(u8 *smc, const u32 *lo, u32 size, u32 a)
+{
+  u32 la = a >= 60 ? a - 60 : 0, ha = a + 4, s = ~0U, p, o;
+  bool covered = false;
+  for (p = la >> RAM_PAGE_SHIFT; p <= (a >> RAM_PAGE_SHIFT); p++)
+    if (lo[p] < s)
+      s = lo[p];
+  if (s == ~0U)
+    return false;
+  for (o = s & ~1U; o < ha && o < size; o += 2)
+  {
+    u16 t = *(u16*)(smc + o);
+    ramtag_type *e;
+    if (!VALID_TAG(t))
+      continue;
+    e = get_ram_tag(t);
+    if ((e->offset_arm && e->end_arm > la) ||
+        (e->offset_thumb && e->end_thumb > la))
+    {
+      if (free_tag_n < sizeof(free_tags) / sizeof(free_tags[0]))
+        free_tags[free_tag_n++] = t;
+      *(u16*)(smc + o) = CODE_TAG_BLOCK16;   /* still code, no longer a block */
+      covered = true;
+#ifdef GPSP_PROFILE
+      prof_ram_pages++;
+#endif
+    }
+  }
+  return covered;
+}
+#endif
+
 void flush_translation_cache_ram_after_interp(void)
 {
 #ifdef HAVE_RAM_PAGE_INVALIDATE
@@ -3976,6 +4038,41 @@ void flush_translation_cache_ram(void)
   {
     u32 p, w;
     PROF_BEGIN(t_drop);
+    if (smc_addr_n <= SMC_ADDRS)
+    {
+      /* only the blocks covering each write; pages where none did */
+      u32 i;
+      for (i = 0; i < smc_addr_n; i++)
+      {
+        u32 a = smc_addrs[i];
+        if ((a >> 24) == 0x02)
+        {
+          if (ram_drop_blocks_at(&ewram[0x40000], ewram_page_lo, 0x40000, a & 0x3FFFF))
+            continue;
+        }
+        else if (ram_drop_blocks_at(iwram, iwram_page_lo, 0x8000, a & 0x7FFF))
+          continue;
+        /* keep this write's pages pending */
+        smc_addrs[i] |= 0x80000000u;
+      }
+      memset(iwram_smc_pending, 0, sizeof(iwram_smc_pending));
+      memset(ewram_smc_pending, 0, sizeof(ewram_smc_pending));
+      for (i = 0; i < smc_addr_n; i++)
+        if (smc_addrs[i] & 0x80000000u)
+        {
+          u32 a = smc_addrs[i] & 0x7FFFFFFFu, off, q;
+          bool ew = (a >> 24) == 0x02;
+          off = a & (ew ? 0x3FFFF : 0x7FFF);
+          for (q = (off >= 60 ? off - 60 : 0) >> RAM_PAGE_SHIFT; q <= off >> RAM_PAGE_SHIFT; q++)
+          {
+            if (ew)
+              ewram_smc_pending[q >> 5] |= 1u << (q & 31);
+            else
+              iwram_smc_pending[q >> 5] |= 1u << (q & 31);
+          }
+        }
+    }
+    smc_addr_n = 0;
     for (w = 0; w < IWRAM_PAGES / 32; w++)
       if (iwram_smc_pending[w])
         for (p = 0; p < 32; p++)
