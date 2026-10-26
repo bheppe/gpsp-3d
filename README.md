@@ -38,7 +38,8 @@ raise the 3D slider. No RetroArch needed.
 - **Forwarder support.** Started with a ROM path as its first argument, the
   app plays that game directly and closes when you quit.
 - **Screen effects**: Scanlines and LCD grid (Display -> Screen effect).
-- **HOME Menu icons per game** (forwarders), see below.
+- **HOME Menu icons per game** (forwarders), made right on the 3DS with
+  **Icon Maker**, or on a PC. See below.
 - **Saves are shared with RetroArch.** Saves go to RetroArch's save folder if
   it exists, so you can switch between the two.
 
@@ -87,6 +88,24 @@ in.
 You can give each game its own HOME Menu icon that starts gpSP 3D straight
 into it (a "forwarder"). gpSP 3D must be installed as a CIA.
 
+### On the 3DS: Icon Maker
+
+1. Install `iconmaker.cia` from the [Releases](../../releases) page with FBI
+   (or run `iconmaker.3dsx` from the Homebrew Launcher).
+2. Open **Icon Maker**, go to your games and press **A** on one. The top screen
+   shows the icon and banner it will get; press **A** again to put it on the
+   HOME Menu. **Y** does every game in the folder at once.
+3. **My icons** (R, or tap the tab) lists the icons you've made; **X** deletes
+   one (the game file stays).
+
+Without any pictures, a game gets a cartridge icon with its name on the label
+and a banner with the icon and its name. To use your own, put them next to the
+game: `Pokemon Emerald.png` for the icon (any size, best square) and
+`Pokemon Emerald.banner.png` for the banner (best 256x128). Making a game again
+replaces its icon. More in [iconmaker/README.md](iconmaker/README.md).
+
+### On a PC: make-forwarders.sh
+
 1. Put the SD card in your PC (or copy the games folder over).
 2. In the devkitPro shell, run, with your own folders:
    ```
@@ -116,6 +135,9 @@ bash gpsp-3d/gpsp3ds/build-gpsp3ds.sh
 
 The script builds the gpSP core (`make platform=ctr`), then the app, then the
 CIA. Results go to `gpsp3ds/out/` (`gpsp3d.cia`, `gpsp3d.3dsx`).
+
+Icon Maker: `bash gpsp-3d/iconmaker/build-iconmaker.sh` (results in
+`iconmaker/out/`).
 
 ### What changed in the core
 
