@@ -1,0 +1,9 @@
+build/
+build-template/
+out/
+data/*.bin
+*.elf
+*.3dsx
+*.smdh
+*.map
+build.log
