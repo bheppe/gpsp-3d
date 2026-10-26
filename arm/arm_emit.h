@@ -76,6 +76,7 @@ void execute_swi_thumb(u32 pc);
 #define armfn_debug_trace         14
 
 #define STORE_TBL_OFF     0x118
+#define RDMAP_OFF         0xD00   /* memory_map_read, as in arm_stub.S */
 #define SPSR_RAM_OFF      0x100
 
 #define write32(value)                                                        \
@@ -1765,10 +1766,86 @@ static void trace_instruction(u32 pc, u32 mode)
   generate_load_pc(rgdst, (value));                                           \
   thumb_complete_store_reg(rgdst, reg_rd)
 
+/* Loads from EWRAM, IWRAM and mapped ROM pages done inline, without the
+ * handler call, when the guest flags are not needed after the instruction
+ * (choosing the region uses the host flags, which hold the guest's). Other
+ * regions, unaligned 16/32-bit loads and unmapped ROM pages take the usual
+ * call. a0 = address, result in reg_rv (= a0). */
+#define ldi_op_u8(rd, rn, rm)   ARM_LDRB_REG_REG(0, rd, rn, rm)
+#define ldi_op_s8(rd, rn, rm)   ARM_LDRSB_REG_REG(0, rd, rn, rm)
+#define ldi_op_u16(rd, rn, rm)  ARM_LDRH_REG_REG(0, rd, rn, rm)
+#define ldi_op_s16(rd, rn, rm)  ARM_LDRSH_REG_REG(0, rd, rn, rm)
+#define ldi_op_u32(rd, rn, rm)  ARM_LDR_REG_REG(0, rd, rn, rm)
+#define ldi_align_u8   0
+#define ldi_align_s8   0
+#define ldi_align_u16  1
+#define ldi_align_s16  1
+#define ldi_align_u32  3
+
+#define generate_load_inline(mem_type, slow_call)                             \
+{                                                                             \
+  u8 *j_notiw, *j_notew, *j_notrom1, *j_notrom2, *j_unmapped;                 \
+  u8 *j_unal1 = NULL, *j_unal2 = NULL, *j_unal3 = NULL;                       \
+  u8 *j_done1, *j_done2, *j_done3;                                            \
+  ARM_MOV_REG_IMMSHIFT(0, reg_a2, reg_a0, ARMSHIFT_LSR, 24);                  \
+  if (ldi_align_##mem_type) {                                                 \
+    ARM_TST_REG_IMM8(0, reg_a0, ldi_align_##mem_type);                        \
+    generate_branch_filler(ARMCOND_NE, j_unal1);                              \
+  }                                                                           \
+  ARM_CMP_REG_IMM8(0, reg_a2, 3);                                             \
+  generate_branch_filler(ARMCOND_NE, j_notiw);                                \
+  /* IWRAM: reg_base + IWRAM_OFF + 0x8000 + (a0 & 0x7FFF) */                  \
+  ARM_MOV_REG_IMMSHIFT(0, reg_a1, reg_a0, ARMSHIFT_LSL, 17);                  \
+  ARM_MOV_REG_IMMSHIFT(0, reg_a1, reg_a1, ARMSHIFT_LSR, 17);                  \
+  ARM_SUB_REG_IMM(0, reg_a1, reg_a1, 0x0A, 16);                               \
+  ldi_op_##mem_type(reg_rv, reg_base, reg_a1);                                \
+  generate_branch_filler(ARMCOND_AL, j_done1);                                \
+  generate_branch_patch_conditional(j_notiw, translation_ptr);                \
+  ARM_CMP_REG_IMM8(0, reg_a2, 2);                                             \
+  generate_branch_filler(ARMCOND_NE, j_notew);                                \
+  /* EWRAM: reg_base + EWRAM_OFF + (a0 & 0x3FFFF) */                          \
+  ARM_MOV_REG_IMMSHIFT(0, reg_a1, reg_a0, ARMSHIFT_LSL, 14);                  \
+  ARM_MOV_REG_IMMSHIFT(0, reg_a1, reg_a1, ARMSHIFT_LSR, 14);                  \
+  ARM_SUB_REG_IMM(0, reg_a1, reg_a1, 0x08, 16);                               \
+  ldi_op_##mem_type(reg_rv, reg_base, reg_a1);                                \
+  generate_branch_filler(ARMCOND_AL, j_done2);                                \
+  generate_branch_patch_conditional(j_notew, translation_ptr);                \
+  /* ROM (0x08-0x0C): through memory_map_read, if the page is loaded */       \
+  ARM_CMP_REG_IMM8(0, reg_a2, 8);                                             \
+  generate_branch_filler(ARMCOND_LO, j_notrom1);                              \
+  ARM_CMP_REG_IMM8(0, reg_a2, 0x0D);                                          \
+  generate_branch_filler(ARMCOND_HS, j_notrom2);                              \
+  ARM_MOV_REG_IMMSHIFT(0, reg_a1, reg_a0, ARMSHIFT_LSR, 15);                  \
+  ARM_ADD_REG_IMMSHIFT(0, reg_a1, reg_base, reg_a1, ARMSHIFT_LSL, 2);         \
+  ARM_LDR_IMM(0, reg_a1, reg_a1, RDMAP_OFF);                                  \
+  ARM_CMP_REG_IMM8(0, reg_a1, 0);                                             \
+  generate_branch_filler(ARMCOND_EQ, j_unmapped);                             \
+  ARM_MOV_REG_IMMSHIFT(0, reg_a2, reg_a0, ARMSHIFT_LSL, 17);                  \
+  ARM_MOV_REG_IMMSHIFT(0, reg_a2, reg_a2, ARMSHIFT_LSR, 17);                  \
+  ldi_op_##mem_type(reg_rv, reg_a1, reg_a2);                                  \
+  generate_branch_filler(ARMCOND_AL, j_done3);                                \
+  generate_branch_patch_conditional(j_notrom1, translation_ptr);              \
+  generate_branch_patch_conditional(j_notrom2, translation_ptr);              \
+  generate_branch_patch_conditional(j_unmapped, translation_ptr);             \
+  if (j_unal1) {                                                              \
+    generate_branch_patch_conditional(j_unal1, translation_ptr);              \
+  }                                                                           \
+  (void)j_unal2; (void)j_unal3;                                               \
+  slow_call                                                                   \
+  generate_branch_patch_unconditional(j_done1, translation_ptr);              \
+  generate_branch_patch_unconditional(j_done2, translation_ptr);              \
+  generate_branch_patch_unconditional(j_done3, translation_ptr);              \
+}
+
 #define thumb_access_memory_load(mem_type, _rd)                               \
   cycle_count += 2;                                                           \
-  generate_load_call_##mem_type();                                            \
-  write32(pc);                                                                \
+  if (!block_data[block_data_position].flags_live) {                          \
+    generate_load_inline(mem_type,                                            \
+      generate_load_call_##mem_type(); write32(pc);)                          \
+  } else {                                                                    \
+    generate_load_call_##mem_type();                                          \
+    write32(pc);                                                              \
+  }                                                                           \
   thumb_generate_store_reg(reg_rv, _rd)                                       \
 
 #define thumb_access_memory_store(mem_type, _rd)                              \

@@ -85,6 +85,7 @@ typedef struct
   u16 flag_data;
   u8 condition;
   u8 update_cycles;
+  u8 flags_live;      // guest flags still needed after this instruction (Thumb)
 } block_data_type;
 
 typedef struct
@@ -3452,6 +3453,7 @@ u8 function_cc *block_lookup_address_thumb(u32 pc)
   while(--block_data_position >= 0)                                           \
   {                                                                           \
     flag_status = block_data[block_data_position].flag_data;                  \
+    block_data[block_data_position].flags_live = needed_mask & 0x0F;          \
     block_data[block_data_position].flag_data =                               \
      (flag_status & needed_mask);                                             \
     needed_mask &= ~((flag_status >> 4) & 0x0F);                              \
