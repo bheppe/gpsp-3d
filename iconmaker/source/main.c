@@ -1,9 +1,11 @@
 /*
- * Icon Maker: puts GBA games on the HOME Menu, right from the 3DS.
+ * Icon Maker: puts GBA and SNES games on the HOME Menu, right from the 3DS.
  *
  * Pick a game; the app builds a small forwarder CIA for it (from the
  * template built into it, see fwdcia.h) and installs it. Started from the
- * HOME Menu, the forwarder opens gpSP 3D straight into the game.
+ * HOME Menu, the forwarder opens the game's emulator straight into it:
+ * gpSP 3D for GBA games, Snes9x 3D for SNES games (it writes the game's
+ * path to the file the emulator reads at startup, then starts it).
  *
  * Name: the game's file name. Icon: a PNG next to the game with the same
  * name (Golf.gba -> Golf.png, any size, best square), else a cartridge
@@ -35,13 +37,29 @@
 /* the template forwarder CIA (data/fwd_gpsp3d.bin, built by build-iconmaker.sh) */
 #include "fwd_gpsp3d_bin.h"
 
-#define ICONMAKER_VERSION "0.1.3"
+#define ICONMAKER_VERSION "0.1.4"
 #define MAX_ENTRIES 1024
 #define MAX_ICONS   300
 #define LAST_DIR    "sdmc:/3ds/gpsp3d/iconmaker_dir.txt"
 
-typedef struct { char name[256]; bool dir, has_icon; } entry;
-typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; } icon_entry;
+typedef struct { char name[256]; bool dir, has_icon; int sys; } entry;
+typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; int sys; } icon_entry;
+
+/* the emulators an icon can start (the publisher on an icon names it) */
+typedef struct
+{
+   const char *name, *console;
+   u64 tid;                    /* its CIA's title ID */
+   const char *launch;         /* the file it reads the game path from ("": gpSP 3D's) */
+   int style;                  /* default icon: which cartridge */
+   u32 tag_rgb;                /* its name's colour on the banner */
+} emulator;
+enum { SYS_GBA, SYS_SNES, SYS_COUNT };
+static const emulator systems[SYS_COUNT] = {
+   { "gpSP 3D",   "GBA",  0x000400000BAC8100ULL, "",                                ICON_GBA,  0x23D5C8 },
+   { "Snes9x 3D", "SNES", 0x00040000038A7100ULL, "sdmc:/3ds/snes9x_3ds/launch.txt", ICON_SNES, 0xB59CFF },
+};
+static bool sys_installed[SYS_COUNT];
 
 static entry entries[MAX_ENTRIES];
 static int nentries, ngames;
@@ -146,13 +164,15 @@ static int cmp_icon(const void *a, const void *b)
 }
 
 /* Icons made by Icon Maker or make-forwarders.sh: titles 00040000 000C0000
- * to 000EFFxx whose publisher is "gpSP 3D". */
+ * to 000EFFxx whose publisher is one of the emulators' names. Also notes
+ * which emulators are installed. */
 static void read_icons(void)
 {
    static u8 smdh[FWDCIA_SMDH_SIZE];
    u32 count = 0, got = 0, i;
    u64 *ids;
    nicons = 0;
+   memset(sys_installed, 0, sizeof(sys_installed));
    if (R_FAILED(AM_GetTitleCount(MEDIATYPE_SD, &count)) || !count)
       return;
    ids = malloc(count * sizeof(u64));
@@ -163,14 +183,22 @@ static void read_icons(void)
       {
          u32 uid = (u32)ids[i] >> 8;
          char pub[64];
+         int k, sys = -1;
+         for (k = 0; k < SYS_COUNT; k++)
+            if (ids[i] == systems[k].tid)
+               sys_installed[k] = true;
          if ((ids[i] >> 32) != 0x00040000 || uid < 0xC0000 || uid >= 0xF0000)
             continue;
          if (!read_title_smdh(ids[i], smdh))
             continue;
          utf16_to_ascii(smdh + 8 + 0x180, 0x40, pub, sizeof(pub));   /* English publisher */
-         if (strcmp(pub, "gpSP 3D"))
+         for (k = 0; k < SYS_COUNT; k++)
+            if (!strcmp(pub, systems[k].name))
+               sys = k;
+         if (sys < 0)
             continue;
          icons[nicons].tid = ids[i];
+         icons[nicons].sys = sys;
          utf16_to_ascii(smdh + 8, 0x40, icons[nicons].name, sizeof(icons[0].name));
          smdh_icon_decode(smdh + 0x2040, 24, icons[nicons].icon24);
          nicons++;
@@ -192,10 +220,48 @@ static bool icon_installed(u64 tid)
 /* the file list                                                       */
 /* ------------------------------------------------------------------ */
 
-static bool is_game(const char *name)
+static int system_of_ext(const char *dot)
 {
-   const char *dot = strrchr(name, '.');
-   return dot && (!strcasecmp(dot, ".gba") || !strcasecmp(dot, ".zip"));
+   if (!dot)
+      return -1;
+   if (!strcasecmp(dot, ".gba"))
+      return SYS_GBA;
+   if (!strcasecmp(dot, ".sfc") || !strcasecmp(dot, ".smc") ||
+       !strcasecmp(dot, ".fig") || !strcasecmp(dot, ".swc"))
+      return SYS_SNES;
+   return -1;
+}
+
+/* Which emulator a game file is for, or -1 if it isn't a game. A .zip is
+ * for the system of the first file in it (GBA if that can't be told). */
+static int system_of(const char *path)
+{
+   const char *dot = strrchr(path, '.');
+   int sys = system_of_ext(dot);
+   if (sys >= 0 || !dot || strcasecmp(dot, ".zip"))
+      return sys;
+   {
+      u8 hdr[30];
+      char inner[256];
+      FILE *f = fopen(path, "rb");
+      int n;
+      sys = SYS_GBA;
+      if (!f)
+         return sys;
+      if (fread(hdr, 1, 30, f) == 30 && hdr[0] == 'P' && hdr[1] == 'K' && hdr[2] == 3 && hdr[3] == 4)
+      {
+         n = hdr[26] | hdr[27] << 8;
+         if (n > 255) n = 255;
+         if (fread(inner, 1, n, f) == (size_t)n)
+         {
+            inner[n] = 0;
+            if (system_of_ext(strrchr(inner, '.')) == SYS_SNES)
+               sys = SYS_SNES;
+         }
+      }
+      fclose(f);
+   }
+   return sys;
 }
 
 static int cmp_entry(const void *a, const void *b)
@@ -222,17 +288,19 @@ static void read_dir(void)
    while ((e = readdir(d)) && nentries < MAX_ENTRIES)
    {
       bool dir = e->d_type == DT_DIR;
+      char path[800];
+      int sys = -1;
       if (e->d_name[0] == '.')
          continue;
-      if (!dir && !is_game(e->d_name))
+      snprintf(path, sizeof(path), "%s%s", cwd, e->d_name);
+      if (!dir && (sys = system_of(path)) < 0)
          continue;
       snprintf(entries[nentries].name, sizeof(entries[0].name), "%s", e->d_name);
       entries[nentries].dir = dir;
+      entries[nentries].sys = sys;
       entries[nentries].has_icon = false;
       if (!dir)
       {
-         char path[800];
-         snprintf(path, sizeof(path), "%s%s", cwd, e->d_name);
          entries[nentries].has_icon = icon_installed(fwdcia_title_id_for(path));
          ngames++;
       }
@@ -322,8 +390,8 @@ static int rgba_text(u8 *img, int w, int h, const ui_font *f, int x, int y, cons
 }
 
 /* the game's name on the generated banner, right of the icon: up to three
- * lines of Inter, then "gpSP 3D" */
-static void banner_name(const char *title, u8 *banner)
+ * lines of Inter, then the emulator's name */
+static void banner_name(const char *title, int sys, u8 *banner)
 {
    const ui_font *f = &ui_font_bold;
    char clean[128], lines[3][64];
@@ -377,12 +445,12 @@ static void banner_name(const char *title, u8 *banner)
       snprintf(lines[nl++], sizeof(lines[0]), "%s", line);
    }
    if (!nl)
-      snprintf(lines[nl++], sizeof(lines[0]), "GBA game");
+      snprintf(lines[nl++], sizeof(lines[0]), "%s game", systems[sys].console);
 
    y = (128 - (nl * 20 + 22)) / 2;
    for (i = 0; i < nl; i++)
       rgba_text(banner, 256, 128, f, 120, y + i * 20, lines[i], 0xFFFFFF);
-   rgba_text(banner, 256, 128, &ui_font_small, 121, y + nl * 20 + 6, "gpSP 3D", 0x23D5C8);
+   rgba_text(banner, 256, 128, &ui_font_small, 121, y + nl * 20 + 6, systems[sys].name, systems[sys].tag_rgb);
 }
 
 /* ------------------------------------------------------------------ */
@@ -394,23 +462,25 @@ typedef struct
    u8 icon48[48 * 48 * 4];
    u8 banner[256 * 128 * 4];
    char title[64];
+   int sys;
    bool has_icon_png, has_banner_png;
 } game_art;
 
-static void make_art(const char *path, game_art *a)
+static void make_art(const char *path, int sys, game_art *a)
 {
    const char *name = strrchr(path, '/') + 1, *dot = strrchr(name, '.');
    int n = (int)(dot - name), iw = 48, ih = 48, bw, bh;
    u8 *icon_png, *banner_png;
 
    snprintf(a->title, sizeof(a->title), "%.*s", n > 63 ? 63 : n, name);
+   a->sys = sys;
    icon_png = load_png(path, "png", &iw, &ih);
    a->has_icon_png = icon_png != NULL;
    if (icon_png)
       icon_scale48(icon_png, iw, ih, a->icon48);
    else
    {
-      default_icon(a->title, a->icon48);
+      default_icon_style(a->title, systems[sys].style, a->icon48);
       iw = ih = 48;
    }
    banner_png = load_png(path, "banner.png", &bw, &bh);
@@ -420,7 +490,7 @@ static void make_art(const char *path, game_art *a)
    else                                /* the icon, bigger, and the name */
    {
       default_banner(a->title, icon_png ? icon_png : a->icon48, iw, ih, a->banner, 0);
-      banner_name(a->title, a->banner);
+      banner_name(a->title, sys, a->banner);
    }
    if (icon_png)
       stbi_image_free(icon_png);
@@ -430,7 +500,7 @@ static void make_art(const char *path, game_art *a)
 
 /* Make and install the icon for the game at path. Returns 0, or -1 with a
  * message in err. */
-static int make_icon(const char *path, char *err, int errlen)
+static int make_icon(const char *path, int sys, char *err, int errlen)
 {
    static game_art art;
    static u8 smdh[FWDCIA_SMDH_SIZE];
@@ -442,8 +512,8 @@ static int make_icon(const char *path, char *err, int errlen)
    Handle h;
    Result r;
 
-   make_art(path, &art);
-   snprintf(longt, sizeof(longt), "%.110s (gpSP 3D)", art.title);
+   make_art(path, sys, &art);
+   snprintf(longt, sizeof(longt), "%.110s (%s)", art.title, systems[sys].name);
 
    cia = malloc(size);
    if (!cia)
@@ -460,12 +530,12 @@ static int make_icon(const char *path, char *err, int errlen)
       return -1;
    }
    memcpy(smdh, tsmdh, sizeof(smdh));
-   smdh_set(smdh, art.title, longt, "gpSP 3D", art.icon48);
+   smdh_set(smdh, art.title, longt, systems[sys].name, art.icon48);
 
    memset(&p, 0, sizeof(p));
    p.title_id = fwdcia_title_id_for(path);
-   p.target = 0;                       /* gpSP 3D */
-   p.launch = "";
+   p.target = systems[sys].tid;        /* the emulator to start */
+   p.launch = systems[sys].launch;
    p.path = path;
    p.smdh = smdh;
    p.banner = art.banner;
@@ -563,6 +633,17 @@ static void present_top(void)
    gfxScreenSwapBuffers(GFX_TOP, false);
 }
 
+/* a small SNES cartridge (wide, ridged sides) */
+static void icon_snes(int x, int y, u16 c)
+{
+   ui_rrect(x, y + 1, 17, 14, 3, c);
+   ui_fill(x + 4, y + 3, 9, 6, C_BG);
+   ui_fill(x + 1, y + 11, 2, 1, C_BG);
+   ui_fill(x + 14, y + 11, 2, 1, C_BG);
+   ui_fill(x + 1, y + 13, 2, 1, C_BG);
+   ui_fill(x + 14, y + 13, 2, 1, C_BG);
+}
+
 static void icon_folder(int x, int y, u16 c)
 {
    ui_rrect(x, y + 2, 7, 4, 1, c);
@@ -602,7 +683,7 @@ static void draw_header(void)
    ui_rrect(122, 8, 18, 15, 7, C_ORANGE);
    ui_fill(130, 11, 2, 9, C_TEXT);
    ui_fill(126, 14, 10, 2, C_TEXT);    /* a "+" badge */
-   ui_text_right(&ui_font_small, UI_W - 10, 10, "for gpSP 3D  v" ICONMAKER_VERSION, C_DIM);
+   ui_text_right(&ui_font_small, UI_W - 10, 10, "GBA + SNES   v" ICONMAKER_VERSION, C_DIM);
 }
 
 static void draw_tabs(int tab)
@@ -658,7 +739,7 @@ static void draw_bottom(int tab, int sel, int top)
       snprintf(info, sizeof(info), "%d game%s", ngames, ngames == 1 ? "" : "s");
       ui_text_right(&ui_font_small, UI_W - 10, LIST_Y - 18, info, C_FAINT);
       if (!nentries)
-         ui_text_center(&ui_font_body, UI_W / 2, 130, "No folders or GBA games here", C_DIM);
+         ui_text_center(&ui_font_body, UI_W / 2, 130, "No folders or GBA / SNES games here", C_DIM);
       for (i = 0; i < ROWS && top + i < nentries; i++)
       {
          const entry *e = &entries[top + i];
@@ -670,6 +751,8 @@ static void draw_bottom(int tab, int sel, int top)
          }
          if (e->dir)
             icon_folder(ROW_X + 10, y + 3, s ? C_WARN : UI_RGB(0xB0, 0x8A, 0x45));
+         else if (e->sys == SYS_SNES)
+            icon_snes(ROW_X + 9, y + 3, s ? C_ACCENT2 : C_FAINT);
          else
             icon_cart(ROW_X + 10, y + 3, s ? C_ACCENT : C_FAINT);
          if (e->has_icon)
@@ -713,7 +796,9 @@ static void draw_bottom(int tab, int sel, int top)
                for (px = 0; px < 19; px++)
                   ui_canvas[(y + 1 + py) * UI_W + ROW_X + 9 + px] = ic->icon24[(py * 24 / 19) * 24 + px * 24 / 19];
          }
-         ui_text_vc(&ui_font_body, ROW_X + 36, y, h, ic->name, s ? C_TEXT : C_TEXT2, ROW_W - 50);
+         ui_text_vc(&ui_font_body, ROW_X + 36, y, h, ic->name, s ? C_TEXT : C_TEXT2, ROW_W - 90);
+         ui_text_right(&ui_font_small, ROW_X + ROW_W - 10, y + (h - ui_font_small.ascent) / 2 - 1,
+                       systems[ic->sys].console, ic->sys == SYS_SNES ? C_ACCENT2 : C_ACCENT);
       }
       draw_scrollbar(nicons, top);
       draw_footer(nicons ? "X: delete icon    L or B: Games" : "L or B: Games");
@@ -740,6 +825,14 @@ static void draw_top_game(const game_art *a, bool installed)
    ui_text(&ui_font_small, 96, 186, a->has_icon_png ? "Icon: its PNG" : "Icon: made from the name", C_DIM, 0);
    ui_text(&ui_font_small, 96, 201, a->has_banner_png ? "Banner: its .banner.png" : "Banner: made from the icon",
            C_DIM, 0);
+   {
+      char opens[80];
+      if (sys_installed[a->sys])
+         snprintf(opens, sizeof(opens), "Opens in %s", systems[a->sys].name);
+      else
+         snprintf(opens, sizeof(opens), "%s isn't installed as a CIA", systems[a->sys].name);
+      ui_text(&ui_font_small, 96, 216, opens, sys_installed[a->sys] ? C_DIM : C_WARN, 0);
+   }
    if (installed)
    {
       ui_rrect(220, 4, 70, 16, 8, UI_RGB(0x1E, 0x3B, 0x2E));
@@ -762,13 +855,14 @@ static void draw_top_intro(void)
 {
    top_bg();
    ui_text_center(&ui_font_title, UI_W / 2, 40, "Icon Maker", C_TEXT);
-   ui_text_center(&ui_font_small, UI_W / 2, 68, "Puts GBA games on the HOME Menu", C_DIM);
+   ui_text_center(&ui_font_small, UI_W / 2, 68, "Puts GBA and SNES games on the HOME Menu", C_DIM);
    text_lines(&ui_font_small, 40, 100, 16,
               "Icon: Golf.png next to Golf.gba (best square),\n"
               "else a cartridge with the game's name.\n"
               "Banner: Golf.banner.png (best 256x128),\n"
               "else the icon, bigger, with the name.\n\n"
-              "gpSP 3D must be installed as a CIA.", C_TEXT2, UI_W - 60);
+              "GBA games open in gpSP 3D, SNES games\n"
+              "in Snes9x 3D: install them as CIAs.", C_TEXT2, UI_W - 60);
 }
 
 static void draw_top_icon(const icon_entry *ic)
@@ -787,7 +881,12 @@ static void draw_top_icon(const icon_entry *ic)
    ui_text(&ui_font_bold, 146, 40, ic->name, C_TEXT, UI_W - 160);
    snprintf(tid, sizeof(tid), "Title %016llX", (unsigned long long)ic->tid);
    ui_text(&ui_font_small, 146, 66, tid, C_DIM, 0);
-   text_lines(&ui_font_small, 146, 92, 15, "X: delete this icon.\nThe game file stays\non the SD card.", C_TEXT2, 0);
+   {
+      char opens[64];
+      snprintf(opens, sizeof(opens), "%s game, opens in %s", systems[ic->sys].console, systems[ic->sys].name);
+      ui_text(&ui_font_small, 146, 82, opens, C_DIM, UI_W - 160);
+   }
+   text_lines(&ui_font_small, 146, 106, 15, "X: delete this icon.\nThe game file stays\non the SD card.", C_TEXT2, 0);
 }
 
 /* ---- dialogs on the bottom screen ---- */
@@ -867,18 +966,23 @@ static void progress(const char *title, const char *line, int done, int n)
 /* actions                                                             */
 /* ------------------------------------------------------------------ */
 
-static void make_one(const char *name)
+static void make_one(const entry *e)
 {
-   char path[800], err[200], body[300];
+   const char *name = e->name;
+   const emulator *em = &systems[e->sys];
+   char path[800], err[200], body[400], missing[160] = "";
    bool again;
    snprintf(path, sizeof(path), "%s%s", cwd, name);
    again = icon_installed(fwdcia_title_id_for(path));
-   snprintf(body, sizeof(body), "%s\nThe top screen shows how it will look.",
-            again ? "It's on the HOME Menu already:\nthis makes it again." : "Its icon and banner go on the HOME Menu.");
+   if (!sys_installed[e->sys])
+      snprintf(missing, sizeof(missing), "\n%s isn't installed as a CIA: the\nicon works once it is.", em->name);
+   snprintf(body, sizeof(body), "%s\nIt opens in %s. The top screen\nshows how it will look.%s",
+            again ? "It's on the HOME Menu already:\nthis makes it again." : "Its icon and banner go on the HOME Menu.",
+            em->name, missing);
    if (!dialog(again ? "Make the icon again?" : "Make an icon?", body, "Make icon", "Cancel", C_ACCENT))
       return;
    progress("Making the icon...", name, 0, 1);
-   if (make_icon(path, err, sizeof(err)))
+   if (make_icon(path, e->sys, err, sizeof(err)))
       dialog("Could not make it", err, "OK", NULL, C_ROW_SEL);
    else
       dialog("Done", "It's on the HOME Menu now.", "OK", NULL, UI_RGB(0x2E, 0x8B, 0x57));
@@ -890,7 +994,7 @@ static void make_folder(void)
    int i, done = 0, failed = 0;
    if (!ngames)
    {
-      dialog("No games here", "This folder has no GBA games.", "OK", NULL, C_ROW_SEL);
+      dialog("No games here", "This folder has no GBA or SNES games.", "OK", NULL, C_ROW_SEL);
       return;
    }
    snprintf(body, sizeof(body), "All %d game%s in this folder.\nGames that are on the HOME Menu\nalready get made again.",
@@ -904,7 +1008,7 @@ static void make_folder(void)
       snprintf(line, sizeof(line), "%d of %d:  %s", done + failed + 1, ngames, entries[i].name);
       progress("Making icons...", line, done + failed, ngames);
       snprintf(path, sizeof(path), "%s%s", cwd, entries[i].name);
-      if (make_icon(path, err, sizeof(err)))
+      if (make_icon(path, entries[i].sys, err, sizeof(err)))
       {
          if (!failed)
             snprintf(first_err, sizeof(first_err), "%s", err);
@@ -1004,7 +1108,7 @@ static void draw_top_for(int tab, int sel, bool am)
    {
       char path[800];
       snprintf(path, sizeof(path), "%s%s", cwd, entries[sel].name);
-      make_art(path, &art);
+      make_art(path, entries[sel].sys, &art);
       draw_top_game(&art, entries[sel].has_icon);
    }
    present_top();
@@ -1090,7 +1194,7 @@ int main(void)
             }
             else if (am)
             {
-               make_one(entries[sel].name);
+               make_one(&entries[sel]);
                read_icons();
                read_dir();
                top_wait = 1;

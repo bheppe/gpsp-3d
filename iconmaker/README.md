@@ -1,9 +1,12 @@
-# Icon Maker for gpSP 3D
+# Icon Maker (GBA + SNES)
 
-Puts GBA games on the HOME Menu right from the 3DS, no PC needed.
+Puts GBA and SNES games on the HOME Menu right from the 3DS, no PC needed.
+GBA games open in gpSP 3D, SNES games (`.sfc`, `.smc`, `.fig`, `.swc`, or a `.zip` of one)
+in [Snes9x 3D](https://github.com/bheppe/snes9x_3ds).
 
 1. Install `iconmaker.cia` with FBI (or run `iconmaker.3dsx` from the Homebrew Launcher).
-   gpSP 3D itself must be installed as a CIA.
+   gpSP 3D (and Snes9x 3D, for SNES games) must be installed as a CIA. Snes9x 3D needs
+   the version that reads `sdmc:/3ds/snes9x_3ds/launch.txt` at startup.
 2. Optional: put a PNG next to a game with the same name (`Golf.gba` -> `Golf.png`),
    best square. It becomes the icon; without one the icon is a cartridge
    with the game's name on it, colored by the name. Making a game again replaces its icon.

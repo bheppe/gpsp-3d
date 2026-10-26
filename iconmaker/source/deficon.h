@@ -6,6 +6,10 @@
  * the label ("(USA)" and the like left out), colored by the name. */
 void default_icon(const char *name, uint8_t *rgba48);
 
+/* the same, as a GBA or a Super Nintendo cartridge */
+enum { ICON_GBA, ICON_SNES };
+void default_icon_style(const char *name, int style, uint8_t *rgba48);
+
 /* A 256x128 RGBA banner for a game with no banner PNG: its icon (iw x ih
  * RGBA, shown 96x96 at (12, 16)) and, with_text, its name in a pixel font on
  * gpSP 3D's navy background. (The app writes the name itself, in Inter.) */

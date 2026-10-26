@@ -33,7 +33,7 @@ static void fail(const char *msg)
 {
    gfxInitDefault();
    consoleInit(GFX_BOTTOM, NULL);
-   printf("\n  gpSP 3D forwarder\n\n  %s\n\n  Press START to go back.\n", msg);
+   printf("\n  HOME Menu game icon\n\n  %s\n\n  Press START to go back.\n", msg);
    while (aptMainLoop())
    {
       hidScanInput();

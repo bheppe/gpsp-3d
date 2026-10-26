@@ -178,38 +178,63 @@ static uint32_t name_hue(const char *clean)
 #define LBL_Y0 13
 #define LBL_Y1 42
 
-void default_icon(const char *name, uint8_t *rgba48)
+void default_icon_style(const char *name, int style, uint8_t *rgba48)
 {
    canvas c = { rgba48, 48, 48 };
    char clean[128], lines[4][33];
-   int nl, i, x;
+   int nl, i, x, y, lx0, lx1, ly0, ly1, cols;
 
    memset(rgba48, 0, 48 * 48 * 4);
    clean_name(name, clean, sizeof(clean));
 
-   /* cartridge: body, grip ridges at the top, label */
-   rect(&c, 4, 4, 43, 45, 0x4A4E58);
-   rect(&c, 3, 6, 44, 45, 0x4A4E58);
-   rect(&c, 4, 45, 43, 45, 0x32353D);
-   rect(&c, 3, 44, 3, 45, 0x32353D);
-   rect(&c, 44, 44, 44, 45, 0x32353D);
-   for (x = 10; x <= 36; x += 4)
-      rect(&c, x, 6, x + 1, 9, 0x5E6370);
-   rect(&c, LBL_X0 - 1, LBL_Y0 - 1, LBL_X1 + 1, LBL_Y1 + 1, 0x2A2C33);
-   rect(&c, LBL_X0, LBL_Y0, LBL_X1, LBL_Y1, hue_rgb(name_hue(clean)));
+   if (style == ICON_SNES)
+   {
+      /* a Super Nintendo cartridge: wide, light grey, ridged lower sides */
+      rect(&c, 4, 5, 43, 44, 0xA9ABB5);
+      rect(&c, 2, 8, 45, 44, 0xA9ABB5);
+      rect(&c, 3, 6, 44, 7, 0xA9ABB5);
+      rect(&c, 2, 42, 45, 44, 0x8A8C96);
+      for (y = 30; y <= 40; y += 3)
+      {
+         rect(&c, 3, y, 6, y, 0x7C7E88);
+         rect(&c, 41, y, 44, y, 0x7C7E88);
+      }
+      lx0 = 9; lx1 = 38; ly0 = 9; ly1 = 37;
+      cols = 7;
+   }
+   else
+   {
+      /* a Game Boy Advance cartridge: body, grip ridges at the top, label */
+      rect(&c, 4, 4, 43, 45, 0x4A4E58);
+      rect(&c, 3, 6, 44, 45, 0x4A4E58);
+      rect(&c, 4, 45, 43, 45, 0x32353D);
+      rect(&c, 3, 44, 3, 45, 0x32353D);
+      rect(&c, 44, 44, 44, 45, 0x32353D);
+      for (x = 10; x <= 36; x += 4)
+         rect(&c, x, 6, x + 1, 9, 0x5E6370);
+      lx0 = LBL_X0; lx1 = LBL_X1; ly0 = LBL_Y0; ly1 = LBL_Y1;
+      cols = 9;
+   }
+   rect(&c, lx0 - 1, ly0 - 1, lx1 + 1, ly1 + 1, style == ICON_SNES ? 0x4A4C55 : 0x2A2C33);
+   rect(&c, lx0, ly0, lx1, ly1, hue_rgb(name_hue(clean)));
 
-   nl = wrap(clean, lines, 4, 9);
+   nl = wrap(clean, lines, 4, cols);
    if (!nl)
    {
-      strcpy(lines[0], "GBA");
+      strcpy(lines[0], style == ICON_SNES ? "SNES" : "GBA");
       nl = 1;
    }
    for (i = 0; i < nl; i++)
    {
       int len = (int)strlen(lines[i]);
-      text(&c, LBL_X0 + (LBL_X1 - LBL_X0 + 1 - (len * 4 - 1)) / 2,
-           LBL_Y0 + (LBL_Y1 - LBL_Y0 + 1 - (nl * 7 - 2)) / 2 + i * 7, 1, lines[i], 0xFFFFFF);
+      text(&c, lx0 + (lx1 - lx0 + 1 - (len * 4 - 1)) / 2,
+           ly0 + (ly1 - ly0 + 1 - (nl * 7 - 2)) / 2 + i * 7, 1, lines[i], 0xFFFFFF);
    }
+}
+
+void default_icon(const char *name, uint8_t *rgba48)
+{
+   default_icon_style(name, ICON_GBA, rgba48);
 }
 
 /* src (sw x sh RGBA) over dst (dw wide) at (x0, y0), by src's alpha */
