@@ -2574,7 +2574,6 @@ typedef struct
   u32 cache_off;    /* where its translation is */
   u32 bytes_off;    /* its copy in ram_reuse_pool */
   u32 next;         /* index + 1 of the next one in the bucket, 0 = none */
-  u32 hash;         /* of its GBA code (compared before the code itself) */
 } ram_reuse_type;
 static ram_reuse_type ram_reuse[REUSE_MAX];
 static u32 ram_reuse_head[REUSE_BUCKETS];
@@ -2676,13 +2675,27 @@ static inline const u8 *ram_code_bytes(u32 a)
   return (a >> 24) == 0x02 ? &ewram[a & 0x3FFFF] : &iwram[0x8000 + (a & 0x7FFF)];
 }
 
-static u32 ram_code_hash(const u8 *p, u32 len)
+/* GBA code compared a word (or halfword) at a time; stops at the first
+ * difference (the versions of a patched routine usually differ early) */
+static bool ram_code_equal(const u8 *a, const u8 *b, u32 len)
 {
-  const u16 *h16 = (const u16*)p;
-  u32 h = 2166136261u, i;
-  for (i = 0; i < len / 2; i++)
-    h = (h ^ h16[i]) * 16777619u;
-  return h;
+  if (!(((uintptr_t)a | (uintptr_t)b | len) & 3))
+  {
+    const u32 *x = (const u32*)a, *y = (const u32*)b;
+    u32 i;
+    for (i = 0; i < len / 4; i++)
+      if (x[i] != y[i])
+        return false;
+  }
+  else
+  {
+    const u16 *x = (const u16*)a, *y = (const u16*)b;
+    u32 i;
+    for (i = 0; i < len / 2; i++)
+      if (x[i] != y[i])
+        return false;
+  }
+  return true;
 }
 
 /* a RAM block was translated at cache_off from [start, end) */
@@ -2701,7 +2714,6 @@ static void ram_reuse_add(u32 key, u32 start, u32 end, u32 cache_off)
   r->cache_off = cache_off;
   r->bytes_off = ram_reuse_pool_n;
   r->next = ram_reuse_head[b];
-  r->hash = ram_code_hash(ram_code_bytes(start), len);
   memcpy(&ram_reuse_pool[ram_reuse_pool_n], ram_code_bytes(start), len);
   ram_reuse_pool_n += (len + 3) & ~3U;
   ram_reuse_head[b] = ++ram_reuse_n;
@@ -2715,18 +2727,12 @@ static u32 ram_reuse_find(u32 pc, u32 thumb, u32 *len)
   u32 i = ram_reuse_head[b], prev = 0, n = 0;
   const u8 *src = ram_code_bytes(pc);
   u32 lim = (pc >> 24) == 0x02 ? 0x40000 : 0x8000;
-  u32 hlen = 0, h = 0;   /* hash of the code now at pc, for one length */
   while (i && n++ < REUSE_CHAIN)
   {
     ram_reuse_type *r = &ram_reuse[i - 1];
     if (r->key == key && (pc & (lim - 1)) + r->len <= lim)
     {
-      if (r->len != hlen)
-      {
-        hlen = r->len;
-        h = ram_code_hash(src, hlen);
-      }
-      if (r->hash != h || memcmp(src, &ram_reuse_pool[r->bytes_off], r->len))
+      if (!ram_code_equal(src, &ram_reuse_pool[r->bytes_off], r->len))
       {
         prev = i;
         i = r->next;
@@ -4072,8 +4078,19 @@ static bool ram_drop_blocks_at(u8 *smc, const u32 *lo, u32 size, u32 a)
     return false;
   for (o = s & ~1U; o < ha && o < size; o += 2)
   {
-    u16 t = *(u16*)(smc + o);
+    u16 t;
     ramtag_type *e;
+    if (!(o & 2))
+    {
+      /* skip whole words of plain "code here" marks (or no code) */
+      u32 w = *(u32*)(smc + o);
+      if (w == 0 || w == CODE_TAG_BLOCK32)
+      {
+        o += 2;
+        continue;
+      }
+    }
+    t = *(u16*)(smc + o);
     if (!VALID_TAG(t))
       continue;
     e = get_ram_tag(t);
