@@ -39,7 +39,7 @@ raise the 3D slider. No RetroArch needed.
   app plays that game directly and closes when you quit.
 - **Screen effects**: Scanlines and LCD grid (Display -> Screen effect).
 - **HOME Menu icons per game** (forwarders), made right on the 3DS with
-  **Icon Maker**, or on a PC. See below.
+  **Icon Maker** (GBA and SNES games), or on a PC. See below.
 - **Saves are shared with RetroArch.** Saves go to RetroArch's save folder if
   it exists, so you can switch between the two.
 
@@ -89,6 +89,11 @@ You can give each game its own HOME Menu icon that starts gpSP 3D straight
 into it (a "forwarder"). gpSP 3D must be installed as a CIA.
 
 ### On the 3DS: Icon Maker
+
+Icon Maker does GBA games (opened in gpSP 3D) and SNES games (`.sfc`, `.smc`,
+`.fig`, `.swc`, opened in [Snes9x 3D](https://github.com/bheppe/snes9x_3ds)
+v1.61-layers6 or newer, installed as a CIA). SNES games get a grey Super
+Nintendo cartridge icon.
 
 1. Install `iconmaker.cia` from the [Releases](../../releases) page with FBI
    (or run `iconmaker.3dsx` from the Homebrew Launcher).

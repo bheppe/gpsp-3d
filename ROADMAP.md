@@ -26,6 +26,7 @@ What's been reported, what's done, and what's next. Reports come from
 | v0.1.2 | **OpenLara black screen** fixed: an interrupt during FIQ mode corrupted r8-r12 | 🧪 (#5) |
 | v0.1.2 | Dynarec: writes over RAM code drop only the pages written to (Mario Golf) | ✅ |
 | v0.1.3 | **Icon Maker**: HOME Menu icons for GBA games made on the 3DS, no PC; own or generated icon and banner, a whole folder at once, delete from the app | ✅ |
+| v0.1.3 | **Icon Maker: SNES games too**, opened in Snes9x 3D (v1.61-layers6+); SNES cartridge icon, GBA/SNES tags in My icons; GBA + SNES app icon and banner | ✅ |
 | v0.1.3 | `make-forwarders.sh`: custom banner per game (`<game>.banner.png`, optional `.banner.wav`) | 🧪 |
 | v0.1.3 | Dynarec: old RAM translations reused when the same code comes back, writes drop only the blocks they cover, cheaper patched-routine handling (Mario Golf, Pokémon GS Chronicles) | 🧪 |
 | v0.1.3 | Dynarec: code run from VRAM translated instead of interpreted, and it no longer flushes all RAM code (Super Mario Galaxy GBA port) | 🧪 |
@@ -47,7 +48,6 @@ What's been reported, what's done, and what's next. Reports come from
 | 14 | Link cable / multiplayer between two 3DS consoles | Han_Solo6712, Discord | 💤 big project (local wireless between consoles) |
 | 15 | In-app About screen crediting gpSP's authors | bheppe | 📋 |
 | 16 | Per-layer 3D for other emulators (PS1 / PCSX) | _SleepyLark_, LargoLaGrande1, goldaxis | 💤 |
-| 17 | Icon Maker: Snes9x 3D games too | bheppe | 📋 needs Snes9x 3D to start a game from a path |
 
 Tip while waiting for fixes: if the stats panel says **Core 2: off (drawing on main core)**, turn on
 **System → Draw on core 2**; drawing on the main core costs a lot of speed.

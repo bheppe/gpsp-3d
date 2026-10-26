@@ -37,7 +37,7 @@
 /* the template forwarder CIA (data/fwd_gpsp3d.bin, built by build-iconmaker.sh) */
 #include "fwd_gpsp3d_bin.h"
 
-#define ICONMAKER_VERSION "0.1.4"
+#define ICONMAKER_VERSION "0.1.3"
 #define MAX_ENTRIES 1024
 #define MAX_ICONS   300
 #define LAST_DIR    "sdmc:/3ds/gpsp3d/iconmaker_dir.txt"
