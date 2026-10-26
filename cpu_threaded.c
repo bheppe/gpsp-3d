@@ -3604,6 +3604,81 @@ if (ram_region && !XL_VRAM) {                                                 \
 #define translate_vram_entry(type)
 #endif
 
+/* Which guest flags each ARM instruction of a block still needs afterwards
+ * (block_data[].flags_live), so loads can use the host flags when none are
+ * (see generate_load_inline). Conservative: unknown cases count as reading
+ * all flags, and nothing is known after an instruction that can leave the
+ * block. Bits: N 8, Z 4, C 2, V 1. */
+static void arm_flags_liveness(u32 start, u32 end)
+{
+  s32 i, n = (end - start) / 4;
+  u32 needed = 0xF;
+  for (i = n - 1; i >= 0; i--)
+  {
+    u32 pc = start + i * 4;
+    const u8 *map = memory_map_read[pc >> 15];
+    u32 op, cond, reads = 0, kills = 0;
+    bool exits;
+    if (!map)
+    {
+      /* not readable here: assume the worst from here back */
+      for (; i >= 0; i--)
+        block_data[i].flags_live = 0xF;
+      return;
+    }
+    op = readaddress32(map, pc & 0x7FFF);
+    cond = op >> 28;
+    op &= 0xFFFFFFF;
+    exits =
+     ((op < 0x8000000) && ((op & 0x000F000) == 0x000F000) &&
+      ((op & 0xDB0F000) != 0x120F000)) ||          /* writes PC */
+     ((op & 0x12FFF10) == 0x12FFF10) ||            /* BX */
+     ((op & 0x8108000) == 0x8108000) ||            /* LDM with PC */
+     (op >= 0xA000000);                            /* B, BL, coproc, SWI */
+    if (exits)
+    {
+      block_data[i].flags_live = 0xF;
+      needed = 0xF;
+      if (cond != 0xE)
+        continue;
+      continue;
+    }
+    block_data[i].flags_live = needed;
+
+    if (cond != 0xE)
+      reads = 0xF;                     /* the condition (and it may not run) */
+    if ((op & 0xE000000) == 0x0000000 && (op & 0x90) == 0x90 &&
+        (op & 0x60) == 0)
+    {
+      /* MUL/MLA/long multiplies (SWP has bit 24 set and S clear) */
+      if ((op & 0x0F000000) == 0 && (op & 0x100000) && cond == 0xE)
+        kills = 0xC;
+    }
+    else if ((op & 0xE000000) == 0x0000000 && (op & 0x90) == 0x90)
+      ;                                 /* halfword/signed transfers */
+    else if ((op & 0xC000000) == 0 && (op & 0x1900000) == 0x1000000)
+    {
+      /* MRS, MSR, BX-like and other misc: MRS reads the flags */
+      reads = 0xF;
+    }
+    else if ((op & 0xC000000) == 0)
+    {
+      u32 opc = (op >> 21) & 0xF, s = (op >> 20) & 1;
+      bool logical = (opc <= 1) || (opc >= 8 && opc != 10 && opc != 11) ;
+      if (opc >= 5 && opc <= 7)
+        reads |= 0x2;                  /* ADC, SBC, RSC read C */
+      if (!(op & 0x2000000) && !(op & 0x10) &&
+          ((op >> 5) & 3) == 3 && ((op >> 7) & 0x1F) == 0)
+        reads |= 0x2;                  /* RRX reads C */
+      if (s && logical)
+        reads |= 0x2;                  /* C may be kept from before */
+      if (s && cond == 0xE)
+        kills = logical ? 0xC : 0xF;
+    }
+    needed = (needed & ~kills) | reads;
+  }
+}
+
 bool translate_block_arm(u32 pc, bool ram_region)
 {
   u32 opcode = 0;
@@ -3684,6 +3759,7 @@ bool translate_block_arm(u32 pc, bool ram_region)
   }
 
   arm_dead_flag_eliminate();
+  arm_flags_liveness(block_start_pc, block_end_pc);
 
   block_exit_position = 0;
   block_data_position = 0;

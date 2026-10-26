@@ -19,6 +19,8 @@ arm-none-eabi-gcc -mcpu=arm7tdmi -nostdlib -T "$HERE/gba.ld" "$HERE/fiq.s" -o "$
 arm-none-eabi-objcopy -O binary -j .text "$WORK/fiq.elf" "$WORK/fiq.gba"
 arm-none-eabi-gcc -mcpu=arm7tdmi -marm -O2 -nostdlib -T "$HERE/gba.ld" "$HERE/crt0.s" "$HERE/bm.c" -o "$WORK/bm.elf"
 arm-none-eabi-objcopy -O binary "$WORK/bm.elf" "$WORK/bm.gba"
+arm-none-eabi-gcc -mcpu=arm7tdmi -nostdlib -T "$HERE/gba.ld" "$HERE/flags.s" -o "$WORK/flags.elf"
+arm-none-eabi-objcopy -O binary "$WORK/flags.elf" "$WORK/flags.gba"
 
 echo "== core (ARM Linux, Raspberry Pi 1 settings = ARM11 like the 3DS)"
 rsync -a --exclude '*.o' --exclude '*.so' --exclude .git "$CORE"/ "$WORK/core/"
@@ -50,6 +52,12 @@ echo "== FIQ banking (fiq.gba)"
 qemu-arm "$WORK/harness" "$WORK/fiq.gba" 1 600 "$WORK/fiq.ppm" > /dev/null
 if python3 -c "import sys; d=open('$WORK/fiq.ppm','rb').read()[15:]; sys.exit(0 if tuple(d[0:3])==(0,248,0) else 1)"
 then echo "  PASS (green)"; else echo "  FAIL (not green)"; fail=1; fi
+echo "== guest flags kept across loads (flags.gba)"
+ref=$(qemu-arm "$WORK/harness" "$WORK/flags.gba" 0 20)
+drc=$(qemu-arm "$WORK/harness" "$WORK/flags.gba" 1 20)
+echo "  interpreter: $(echo ${ref#*results:} | cut -d' ' -f1-2)  dynarec: $(echo ${drc#*results:} | cut -d' ' -f1-2)"
+if [ "${ref#*results:}" = "${drc#*results:}" ]; then echo "  PASS"; else echo "  FAIL"; fail=1; fi
+
 echo "== bitmap modes on the render thread (bm.gba)"
 one=$(HASH=1 THREAD=0 qemu-arm "$WORK/harness" "$WORK/bm.gba" 1 170 | grep -o 'hash=[0-9A-F]*')
 two=$(HASH=1 THREAD=1 qemu-arm "$WORK/harness" "$WORK/bm.gba" 1 170 | grep -o 'hash=[0-9A-F]*')

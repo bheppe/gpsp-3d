@@ -1393,8 +1393,13 @@ static void trace_instruction(u32 pc, u32 mode)
 
 #define arm_access_memory_load(mem_type)                                      \
   cycle_count += 2;                                                           \
-  generate_load_call_##mem_type();                                            \
-  write32(pc);                                                                \
+  if (!block_data[block_data_position].flags_live && rd != REG_PC) {          \
+    generate_load_inline(mem_type,                                            \
+      generate_load_call_##mem_type(); write32(pc);)                          \
+  } else {                                                                    \
+    generate_load_call_##mem_type();                                          \
+    write32(pc);                                                              \
+  }                                                                           \
   arm_generate_store_reg_pc_no_flags(reg_rv, rd)                              \
 
 #define arm_access_memory_store(mem_type)                                     \
