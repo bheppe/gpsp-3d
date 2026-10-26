@@ -40,7 +40,7 @@ ls -l data/fwd_gpsp3d.bin
 echo "=== 2/2 Icon Maker ==="
 make
 bannertool makebanner -i res/banner.png -a "$GP/res/silent.wav" -o "$TMP/app.bnr" >/dev/null
-bannertool makesmdh -s "Icon Maker" -l "Icon Maker for gpSP 3D" -p "gpSP 3D" \
+bannertool makesmdh -s "Icon Maker" -l "Icon Maker: GBA + SNES" -p "bheppe" \
   -i res/icon.png -o "$TMP/app.icn" >/dev/null
 makerom -f cia -o out/iconmaker.cia -rsf "$GP/res/app.rsf" -exefslogo -elf iconmaker.elf \
   -icon "$TMP/app.icn" -banner "$TMP/app.bnr" \

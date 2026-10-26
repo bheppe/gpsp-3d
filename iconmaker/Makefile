@@ -17,9 +17,9 @@ INCLUDES := source ../gpsp3ds/source
 # gpSP 3D's UI kit (ui.c, ui_font.c), shared so both apps look the same
 UIKIT    := ../gpsp3ds/source
 
-APP_TITLE       := Icon Maker for gpSP 3D
-APP_DESCRIPTION := Put GBA games on the HOME Menu
-APP_AUTHOR      := gpSP 3D
+APP_TITLE       := Icon Maker
+APP_DESCRIPTION := GBA + SNES games on the HOME Menu
+APP_AUTHOR      := bheppe
 ICON            := res/icon.png
 
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
