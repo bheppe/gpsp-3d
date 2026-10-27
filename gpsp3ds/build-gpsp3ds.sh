@@ -46,7 +46,7 @@ makerom -f cia -o gpsp3d.cia -rsf res/app.rsf -exefslogo -elf gpsp3d.elf \
   -icon build/gpsp3d.icn -banner build/gpsp3d.bnr \
   -DAPP_TITLE="gpSP 3D" -DAPP_PRODUCT_CODE="CTR-GPSP3D" -DAPP_UNIQUE_ID=0xBAC81 \
   -DAPP_SYSTEM_MODE=64MB -DAPP_SYSTEM_MODE_EXT=124MB -DAPP_ENCRYPTED=false \
-  -major 0 -minor 1 -micro 3
+  -major 0 -minor 1 -micro 4
 
 mkdir -p "$HERE/out"
 cp gpsp3d.cia gpsp3d.3dsx "$HERE/out/"

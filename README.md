@@ -65,11 +65,18 @@ raise the 3D slider. No RetroArch needed.
 ## Using it
 
 - **GBA controls:** A, B, L, R, Start, Select, D-pad / Circle Pad.
+- **Fast forward:** hold **Y** (or set it to toggle in **Speed -> Fast forward**).
+  **Speed -> Fast forward speed** picks Max, 2x, 3x or 4x. Light games reach 2-4x
+  on an Old 3DS; a New 3DS has more headroom.
+- **Zipped games** (`.zip`) work: the game is unzipped once to
+  `sdmc:/3ds/gpsp3d/unzipped/` (the last one played is kept, so starting it again
+  is instant). Saves are still named after the zip and kept next to it.
 - **Menu:** tap the bottom screen while playing. Tabs:
   **Game** (save/load state, slot, reset, quit), **Display** (screen size,
   scaling, color), **3D** (effect, strength, layer style, per-layer depths,
   sprite pop, focus, floor tilt, smart layers), **Speed** (frame skip, audio when slow,
-  stats) and **System** (core 2 drawing, GPU display, core 2 priority).
+  fast forward, stats) and **System** (core 2 drawing, GPU display, core 2 priority,
+  and **Save file**: where the current game's save is).
 - **3D:** raise the 3DS 3D slider. **3D tab -> Strength** scales the effect.
   **3D tab -> Layer style** picks a preset. **3D tab -> Settings for** chooses
   whether changes apply to all games or only this one.

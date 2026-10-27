@@ -1,7 +1,7 @@
 # gpSP 3D roadmap
 
 What's been reported, what's done, and what's next. Reports come from
-[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.3 (updated Oct 26).
+[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.4 (updated Oct 27).
 
 **Status key:** ✅ done · 🧪 done, needs testing on real hardware · 🔧 next up · 📋 planned · 💤 later / big project
 
@@ -32,6 +32,9 @@ What's been reported, what's done, and what's next. Reports come from
 | v0.1.3 | Dynarec: code run from VRAM translated instead of interpreted, and it no longer flushes all RAM code (Super Mario Galaxy GBA port) | 🧪 |
 | v0.1.3 | Dynarec (ARM): RAM/ROM loads done inline when the flags aren't needed; memory handlers return in a way the CPU can predict | 🧪 |
 | v0.1.3 | Render thread: bitmap modes 3-5 copy each row with its line instead of VRAM blocks | 🧪 |
+| v0.1.4 | **Fast forward** on Y (hold or toggle), Max / 2x / 3x / 4x | 🧪 |
+| v0.1.4 | **Zipped games work** (#6: a .zip was loaded as if it were the ROM, which hung, then crashed): unzipped once to a cache on the SD card | 🧪 |
+| v0.1.4 | **System -> Save file** shows where the current game's save is | 🧪 |
 
 ## Open
 
@@ -49,6 +52,7 @@ What's been reported, what's done, and what's next. Reports come from
 | 15 | In-app About screen crediting gpSP's authors | bheppe | 📋 |
 | 16 | Per-layer 3D for other emulators (PS1 / PCSX) | _SleepyLark_, LargoLaGrande1, goldaxis | 💤 |
 | 17 | Smashing Drive: 60-70% speed on Old 3DS (software 3D) | Advil Lavs (Discord) | 🔧 needs a profile log from a race |
+| 18 | **Save folder setting** and mGBA-style `.sav` saves (#7) | michvllni, AlessVei (Reddit) | 🔧 michvllni is working on it |
 
 Tip while waiting for fixes: if the stats panel says **Core 2: off (drawing on main core)**, turn on
 **System → Draw on core 2**; drawing on the main core costs a lot of speed.
