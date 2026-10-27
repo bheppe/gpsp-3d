@@ -53,10 +53,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare build image
+        # The image of this commit's Dockerfile, as in ci.yml
         run: |
-          BUILD_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gpsp3d-devcontainer:latest"
-          echo "BUILD_IMAGE=$BUILD_IMAGE" >> "$GITHUB_ENV"
-          docker pull "$BUILD_IMAGE" || docker build -f docker/gpsp3d-devcontainer.Dockerfile -t "$BUILD_IMAGE" .
+          image="$(bash docker/build-image.sh --pull)"
+          echo "BUILD_IMAGE=$image" >> "$GITHUB_ENV"
 
       - name: Build
         run: |
