@@ -132,6 +132,8 @@ static char rom_name[256];
 static char save_path[512];
 static char state_path[512];
 static char save_dir[512];
+static char state_dir[512];
+static char old_save_dir[512];  /* where saves went before save_dir/save_ext were set */
 
 static bool game_loaded;
 static bool quit_app;
@@ -140,6 +142,7 @@ static bool frame_ready;
 static u8    *state_buf;
 static size_t state_size;
 static u32    sram_hash;
+static size_t sram_loaded;      /* size of the save file that was loaded (0 for .srm) */
 
 /* settings (saved in gpsp3d.cfg) */
 static int opt_frameskip = 1; /* 0 = off, 1 = auto (skip drawing a frame core 2 can't finish in time) */
@@ -159,6 +162,11 @@ static int opt_sat = 100;     /* saturation % */
 static int opt_bright = 100;  /* brightness % (gamma) */
 static int opt_core2 = 1;   /* draw on the second CPU core */
 static int opt_display;     /* forward: defined with the display code */
+/* where saves and states go (empty: RetroArch's save folder or next to the
+ * ROM) and the saves' extension (empty: srm) */
+static char opt_save_dir[256];
+static char opt_state_dir[256];
+static char opt_save_ext[8];
 /* 3D settings (all games, or one game when it has its own profile) */
 typedef struct {
    int on;          /* per-layer 3D */
@@ -216,6 +224,23 @@ static bool file_exists(const char *p)
    return stat(p, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+/* mkdir -p */
+static void mkdir_path(const char *p)
+{
+   char tmp[512];
+   char *s;
+   snprintf(tmp, sizeof(tmp), "%s", p);
+   for (s = strchr(tmp, '/'); s; s = strchr(s + 1, '/'))
+   {
+      if (s == tmp || s[-1] == ':')
+         continue;
+      *s = '\0';
+      mkdir(tmp, 0777);
+      *s = '/';
+   }
+   mkdir(tmp, 0777);
+}
+
 static u32 hash_mem(const void *p, size_t n)
 {
    const u32 *w = (const u32*)p;
@@ -232,6 +257,32 @@ static u32 hash_mem(const void *p, size_t n)
 /* ------------------------------------------------------------------ */
 
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+/* a folder setting, without the trailing slash */
+static void set_dir(char *out, size_t n, const char *v)
+{
+   size_t l;
+   snprintf(out, n, "%s", v);
+   l = strlen(out);
+   while (l && out[l - 1] == '/')
+      out[--l] = '\0';
+}
+
+/* the save extension: letters and digits, a leading dot is dropped */
+static void set_ext(const char *v)
+{
+   size_t i;
+   if (*v == '.')
+      v++;
+   for (i = 0; v[i]; i++)
+      if (i >= sizeof(opt_save_ext) - 1 ||
+          !((v[i] >= 'a' && v[i] <= 'z') || (v[i] >= 'A' && v[i] <= 'Z') || (v[i] >= '0' && v[i] <= '9')))
+      {
+         opt_save_ext[0] = '\0';
+         return;
+      }
+   snprintf(opt_save_ext, sizeof(opt_save_ext), "%s", v);
+}
 
 /* 3D keys, shared by gpsp3d.cfg and per-game profiles */
 static bool d3_parse(const char *k, const char *v, s3d *d)
@@ -279,6 +330,12 @@ static void config_load(void)
       *eq++ = '\0';
       if (!strcmp(line, "last_dir") && dir_exists(eq))
          snprintf(cur_dir, sizeof(cur_dir), "%s", eq);
+      else if (!strcmp(line, "save_dir"))
+         set_dir(opt_save_dir, sizeof(opt_save_dir), eq);
+      else if (!strcmp(line, "state_dir"))
+         set_dir(opt_state_dir, sizeof(opt_state_dir), eq);
+      else if (!strcmp(line, "save_ext"))
+         set_ext(eq);
       else if (!strcmp(line, "frame_skip"))
          opt_frameskip = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "ff_toggle"))
@@ -351,6 +408,8 @@ static void config_save(void)
          cur_dir, opt_frameskip, opt_profiler, opt_colorcorr, opt_core2, opt_display, opt_gpu,
          opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill, opt_crt,
          opt_ff_toggle, opt_ff_speed);
+   /* no menu entries for these: written even when empty so they can be found */
+   fprintf(f, "save_dir=%s\nstate_dir=%s\nsave_ext=%s\n", opt_save_dir, opt_state_dir, opt_save_ext);
    /* the all-games 3D settings (a game with its own profile keeps them aside) */
    d3_write(f, d3_pergame ? &d3_global : &d3);
    fclose(f);
@@ -1520,20 +1579,72 @@ static bool environment(unsigned cmd, void *data)
 /* Saves                                                               */
 /* ------------------------------------------------------------------ */
 
+u32 gpsp_backup_size(void);
+
+static const char *save_ext(void) { return opt_save_ext[0] ? opt_save_ext : "srm"; }
+
+/* Another place the game's save may be: where it went before save_dir or
+ * save_ext were changed (RetroArch's folder or next to the ROM, .srm).
+ * *srm is set when the file found is a .srm. */
+static FILE *sram_open_old(bool *srm)
+{
+   const char *slash = strrchr(rom_path, '/');
+   const char *exts[3] = { save_ext(), "srm", "sav" };
+   char rom_dir[512];
+   const char *dirs[5] = { save_dir, old_save_dir, rom_dir, RA_SAVE_DIR, RA_SAVE_DIR2 };
+   char p[800];
+   int d, e;
+   snprintf(rom_dir, sizeof(rom_dir), "%.*s", slash ? (int)(slash - rom_path) : 0, rom_path);
+   for (d = 0; d < 5; d++)
+      for (e = 0; e < 3; e++)
+      {
+         FILE *f;
+         snprintf(p, sizeof(p), "%s/%s.%s", dirs[d], rom_name, exts[e]);
+         if (strcmp(p, save_path) && (f = fopen(p, "rb")))
+         {
+            *srm = !strcasecmp(exts[e], "srm");
+            return f;
+         }
+      }
+   return NULL;
+}
+
 static void sram_load(void)
 {
    void  *p = retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
    size_t n = retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
    FILE  *f;
+   bool   srm = !strcasecmp(save_ext(), "srm");
+   sram_loaded = 0;
    if (!p || !n)
       return;
+   /* a save found in an old place is written to save_path once it changes */
    f = fopen(save_path, "rb");
+   if (!f)
+      f = sram_open_old(&srm);
    if (f)
    {
-      fread(p, 1, n, f);
+      size_t got = fread(p, 1, n, f);
+      if (!srm)   /* .srm files are always padded to 128KiB */
+         sram_loaded = got;
       fclose(f);
    }
    sram_hash = hash_mem(p, n);
+}
+
+/* How much of the save memory to write. .srm is always the full 128KiB
+ * (like RetroArch); other extensions (.sav for mGBA, open_agb_firm) get the
+ * cartridge's real size, never less than the file had (an 8KiB EEPROM reads
+ * as 512 bytes until the game uses it). 0: the game has no save yet. */
+static size_t sram_file_size(size_t n)
+{
+   size_t real;
+   if (!strcasecmp(save_ext(), "srm"))
+      return n;
+   real = gpsp_backup_size();
+   if (real < sram_loaded)
+      real = sram_loaded;
+   return real < n ? real : n;
 }
 
 static void sram_flush(bool force)
@@ -1545,12 +1656,16 @@ static void sram_flush(bool force)
    if (!game_loaded || !p || !n)
       return;
    h = hash_mem(p, n);
-   if (h == sram_hash && !force)
+   /* .sav is only written once the game has changed it: by then the game
+    * has used its save memory, so its real size is known */
+   if (h == sram_hash && (!force || strcasecmp(save_ext(), "srm")))
+      return;
+   if (!sram_file_size(n))
       return;
    f = fopen(save_path, "wb");
    if (f)
    {
-      fwrite(p, 1, n, f);
+      fwrite(p, 1, sram_file_size(n), f);
       fclose(f);
       sram_hash = h;
    }
@@ -1828,9 +1943,9 @@ static bool browse(void)
 static void state_path_for(int slot, char *out, size_t n)
 {
    if (slot)
-      snprintf(out, n, "%s/%s.state%d", save_dir, rom_name, slot);
+      snprintf(out, n, "%s/%s.state%d", state_dir, rom_name, slot);
    else
-      snprintf(out, n, "%s/%s.state", save_dir, rom_name);
+      snprintf(out, n, "%s/%s.state", state_dir, rom_name);
 }
 static void make_state_path(void) { state_path_for(opt_slot, state_path, sizeof(state_path)); }
 static bool state_exists(int slot)
@@ -1867,13 +1982,30 @@ static void make_paths(void)
     * two), unless the game already has a save next to the ROM. */
    snprintf(try_path, sizeof(try_path), "%s%s.srm", rom_dir, rom_name);
    if (!file_exists(try_path) && dir_exists(RA_SAVE_DIR))
-      snprintf(save_dir, sizeof(save_dir), "%s", RA_SAVE_DIR);
+      snprintf(old_save_dir, sizeof(old_save_dir), "%s", RA_SAVE_DIR);
    else if (!file_exists(try_path) && dir_exists(RA_SAVE_DIR2))
-      snprintf(save_dir, sizeof(save_dir), "%s", RA_SAVE_DIR2);
+      snprintf(old_save_dir, sizeof(old_save_dir), "%s", RA_SAVE_DIR2);
    else
-      snprintf(save_dir, sizeof(save_dir), "%.*s", (int)(dl ? dl - 1 : 0), rom_path);
+      snprintf(old_save_dir, sizeof(old_save_dir), "%.*s", (int)(dl ? dl - 1 : 0), rom_path);
 
-   snprintf(save_path, sizeof(save_path), "%s/%s.srm", save_dir, rom_name);
+   /* gpsp3d.cfg can name other folders (e.g. one shared with mGBA or
+    * open_agb_firm); states go with the saves unless they have their own */
+   if (opt_save_dir[0])
+   {
+      mkdir_path(opt_save_dir);
+      snprintf(save_dir, sizeof(save_dir), "%s", opt_save_dir);
+   }
+   else
+      snprintf(save_dir, sizeof(save_dir), "%s", old_save_dir);
+   if (opt_state_dir[0])
+   {
+      mkdir_path(opt_state_dir);
+      snprintf(state_dir, sizeof(state_dir), "%s", opt_state_dir);
+   }
+   else
+      snprintf(state_dir, sizeof(state_dir), "%s", save_dir);
+
+   snprintf(save_path, sizeof(save_path), "%s/%s.%s", save_dir, rom_name, save_ext());
    memset(state_known, 0, sizeof(state_known));
    make_state_path();
 }

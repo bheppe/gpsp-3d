@@ -1487,6 +1487,20 @@ static u16 gyro_sample;
 int gpsp_gyro_z = 0;
 int gpsp_gyro_present(void) { return gyro_enabled; }
 
+/* Size of the cartridge's save memory as other emulators (mGBA) store it,
+ * or 0 while the game hasn't used it yet. gamepak_backup always holds the
+ * biggest possible size (128KiB); only this much of it is the real save. */
+u32 gpsp_backup_size(void)
+{
+  switch (backup_type)
+  {
+    case BACKUP_SRAM:   return 32 * 1024;
+    case BACKUP_FLASH:  return flash_bank_cnt == FLASH_SIZE_128KB ? 128 * 1024 : 64 * 1024;
+    case BACKUP_EEPROM: return eeprom_size == EEPROM_8_KBYTE ? 8 * 1024 : 512;
+    default:            return 0;
+  }
+}
+
 // I/O registers (for RTC, rumble, etc)
 u8 gpio_regs[3];
 
