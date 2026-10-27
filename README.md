@@ -144,6 +144,21 @@ CIA. Results go to `gpsp3ds/out/` (`gpsp3d.cia`, `gpsp3d.3dsx`).
 Icon Maker: `bash gpsp-3d/iconmaker/build-iconmaker.sh` (results in
 `iconmaker/out/`).
 
+### Building in a devcontainer
+
+The repo has a devcontainer with everything above already installed (devkitARM
+with `3ds-dev`, plus `makerom` and `bannertool` at pinned versions). Open the
+repo in VS Code with the Dev Containers extension (Docker or Podman) and choose
+**Reopen in Container**, or start a GitHub Codespace. The first start builds
+the image, which takes a few minutes. Then, in the container's terminal:
+
+```
+bash gpsp3ds/build-gpsp3ds.sh
+bash iconmaker/build-iconmaker.sh
+```
+
+The image is defined in `docker/gpsp3d-devcontainer.Dockerfile`.
+
 ### What changed in the core
 
 - `video_thread.cc` / `video_thread_sys.c`: a threaded renderer. The main core

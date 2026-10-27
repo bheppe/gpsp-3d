@@ -1,0 +1,24 @@
+{
+    "name": "gpSP 3D - 3DS Homebrew",
+    "build": {
+        "dockerfile": "../docker/gpsp3d-devcontainer.Dockerfile",
+        "context": ".."
+    },
+    "remoteEnv": {
+        "DEVKITPRO": "/opt/devkitpro",
+        "DEVKITARM": "/opt/devkitpro/devkitARM",
+        "PATH": "${containerEnv:PATH}:/opt/devkitpro/devkitARM/bin:/opt/devkitpro/tools/bin"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.makefile-tools",
+                "Anthropic.claude-code"
+            ],
+            "settings": {
+                "C_Cpp.default.compilerPath": "/opt/devkitpro/devkitARM/bin/arm-none-eabi-gcc"
+            }
+        }
+    }
+}
