@@ -45,9 +45,10 @@ What's been reported, what's done, and what's next. Reports come from
 | 11 | Doom II: 11 fps, no depth (one bitmap layer) | Male_Inkling | 📋 depth: try Floor tilt |
 | 12 | Faster 3D drawing on Old 3DS (3D pictures refresh ~15-30/s) | bheppe | 📋 |
 | 13 | RetroAchievements | MysticFlipFlop (#1) | 📋 casual mode first; hardcore needs 6 months of releases |
-| 14 | Link cable / multiplayer between two 3DS consoles | Han_Solo6712, Discord | 💤 big project (local wireless between consoles) |
+| 14 | Link cable / wireless adapter multiplayer, e.g. **Pokémon trading with RetroArch's gpSP** on a PC, phone or another 3DS | Han_Solo6712, Shot_Jicama4942 (Reddit), Discord | 📋 after Genesis 3D. The gpSP core already emulates the wireless adapter and link cable (packets over RetroArch netplay); gpSP 3D needs RetroArch's netplay protocol (packet mode) and a host/join menu |
 | 15 | In-app About screen crediting gpSP's authors | bheppe | 📋 |
 | 16 | Per-layer 3D for other emulators (PS1 / PCSX) | _SleepyLark_, LargoLaGrande1, goldaxis | 💤 |
+| 17 | Smashing Drive: 60-70% speed on Old 3DS (software 3D) | Advil Lavs (Discord) | 🔧 needs a profile log from a race |
 
 Tip while waiting for fixes: if the stats panel says **Core 2: off (drawing on main core)**, turn on
 **System → Draw on core 2**; drawing on the main core costs a lot of speed.
