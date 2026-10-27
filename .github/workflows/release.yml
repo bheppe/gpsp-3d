@@ -14,6 +14,8 @@ jobs:
   # itself. Checked first, so a mismatch fails before anything is uploaded.
   version:
     name: Version Check
+    # The nightly pre-release is CI's (ci.yml), not a version
+    if: github.event.release.tag_name != 'nightly'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
