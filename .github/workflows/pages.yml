@@ -1,0 +1,189 @@
+name: Pages
+
+# Builds the GitHub Pages site from docs/ plus a Universal-Updater store
+# (UniStore v3) for gpSP 3D, Icon Maker and Snes9x 3D, generated from ALL
+# published releases of this repo and bheppe/snes9x_3ds. Nothing generated is
+# committed. The store's content is a pure function of the release lists
+# (.github/unistore.jq); only its revision is carried over from the deployed
+# store, and it moves only when the content does.
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - gpsp3ds/res/icon.png
+      - iconmaker/res/icon.png
+      - .github/unistore.jq
+      - .github/workflows/pages.yml
+  release:
+    # Every change to the list, also releases uploaded by hand without Release
+    types: [published, edited, deleted, unpublished]
+  # Snes9x 3D releases happen in another repo and can't start this workflow.
+  # A run with no new release changes nothing: the revision stays the same.
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  SNES9X_REPO: bheppe/snes9x_3ds
+
+jobs:
+  # A release event runs with GITHUB_REF set to the tag, and the github-pages
+  # environment only accepts deployments from main, so the deploy would be
+  # refused. Re-dispatch on main instead; workflow_dispatch is the one event
+  # GITHUB_TOKEN is allowed to start.
+  redispatch:
+    name: Re-run on main
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch
+        run: gh workflow run pages.yml --repo "${{ github.repository }}" --ref main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build site and UniStore
+    # Only after a successful Release run, so the store never lists a version
+    # whose files aren't uploaded yet (releases missing them are left out anyway).
+    if: >-
+      github.event_name != 'release' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      pages: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # The site's address: <owner>.github.io/<repo>, or a custom domain once
+      # one is set in the repo's Pages settings
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Copy site
+        run: |
+          mkdir -p _site/unistore
+          cp -r docs/. _site/
+          echo "BASE_URL=${{ steps.pages.outputs.base_url }}" >> "$GITHUB_ENV"
+
+      - name: Fetch all releases
+        run: |
+          fetch() {
+            gh api --paginate "repos/$1/releases?per_page=100" --jq '.[]' \
+              | jq -s '[ .[] | {tag_name, draft, prerelease, published_at, body,
+                               assets: [ .assets[] | {name, size, browser_download_url} ] } ]'
+          }
+          fetch "${{ github.repository }}" > gpsp.json
+          fetch "$SNES9X_REPO" > snes9x.json
+          jq -n --slurpfile g gpsp.json --slurpfile s snes9x.json '{gpsp: $g[0], snes9x: $s[0]}' > releases.json
+          echo "Releases: $(jq '.gpsp | length' releases.json) gpSP 3D, $(jq '.snes9x | length' releases.json) Snes9x 3D"
+
+      - name: Fetch deployed store
+        run: |
+          # Its revision is the floor for ours. The query string gets past the
+          # Pages CDN cache, which would otherwise hand back a store up to ten
+          # minutes old. 404 means nothing has been deployed yet; anything else
+          # stops the run, because guessing could move the revision backwards.
+          code="$(curl -sS -o deployed.json -w '%{http_code}' \
+            "$BASE_URL/unistore/gpsp3d.unistore?t=$(date +%s)")"
+          case "$code" in
+            200) jq -e '.storeInfo.revision | type == "number"' deployed.json >/dev/null ;;
+            404) echo 'null' > deployed.json ;;
+            *)   echo "::error::Deployed store returned HTTP $code"; exit 1 ;;
+          esac
+          echo "Deployed revision: $(jq '.storeInfo.revision? // "none"' deployed.json)"
+
+      - name: Generate UniStore
+        run: |
+          jq -S --arg base "$BASE_URL" -f .github/unistore.jq releases.json > feed.json
+
+          # Universal-Updater only re-downloads a store whose revision is
+          # strictly greater than the one it has. Keep the deployed revision
+          # while nothing else changed, so docs-only pushes and quiet scheduled
+          # runs don't make every console refetch; otherwise move past both it
+          # and the clock, which keeps it rising across deletions and edits too.
+          jq -S --slurpfile d deployed.json '
+            ($d[0].storeInfo.revision? // 0) as $old
+            | if $d[0] != null and ($d[0] | .storeInfo.revision = 0) == .
+              then .storeInfo.revision = $old
+              else .storeInfo.revision = ([$old + 1, (now | floor)] | max)
+              end' feed.json > _site/unistore/gpsp3d.unistore
+          jq -S '{storeInfo}' _site/unistore/gpsp3d.unistore > _site/unistore/gpsp3d-info.json
+
+          jq -r '"Store revision \(.storeInfo.revision): " + ([.storeContent[] | "\(.info.title) \(.info.version) (\(keys | length - 1) downloads)"] | join(", "))' \
+            _site/unistore/gpsp3d.unistore
+
+      - name: Check download URLs
+        run: |
+          jq -r '.storeContent[][] | .script[]? | select(.type == "downloadFile") | .file' \
+            _site/unistore/gpsp3d.unistore | sort -u | while read -r url; do
+              curl -fsSIL -o /dev/null "$url" || { echo "::error::Unreachable: $url"; exit 1; }
+            done
+
+      # One icon per app, in the order of icon_index in .github/unistore.jq.
+      # Snes9x 3D's comes from its newest listed release.
+      - name: Build icon sheet
+        run: |
+          tag="$(jq -r '.storeContent[] | select(.info.title == "Snes9x 3D") | .info.version' _site/unistore/gpsp3d.unistore)"
+          mkdir -p icons
+          cp gpsp3ds/res/icon.png icons/0-gpsp3d.png
+          cp iconmaker/res/icon.png icons/1-iconmaker.png
+          if [ -n "$tag" ]; then
+            curl -fsSL -o icons/2-snes9x.png "https://raw.githubusercontent.com/$SNES9X_REPO/$tag/resources/icon.png"
+          else
+            # Not listed: keep the index taken, so the others don't move
+            cp icons/0-gpsp3d.png icons/2-snes9x.png
+          fi
+          printf -- '--atlas -f rgba8888 -z auto\nicons/0-gpsp3d.png\nicons/1-iconmaker.png\nicons/2-snes9x.png\n' > icons.t3s
+          image="$(bash docker/build-image.sh --pull)"
+          docker run --rm -v "$PWD:/workspace" -w /workspace "$image" \
+            tex3ds -i icons.t3s -o _site/unistore/gpsp3d.t3x
+          sudo chown -R "$USER" _site/
+
+      - name: Store QR code
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qrencode
+          qrencode -o _site/unistore/gpsp3d-unistore-QR.png -s 8 -m 3 -l M \
+            "$BASE_URL/unistore/gpsp3d.unistore"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
