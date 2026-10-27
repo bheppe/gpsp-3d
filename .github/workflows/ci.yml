@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  # The dynarec checks from tests/gba-roms: the core built for ARM Linux and run
+  # under qemu, compared with the interpreter. They need no devkitPro, so they
+  # run on the plain runner, apart from the build so both report even when one fails.
+  rom-tests:
+    name: Core ROM Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross compilers and qemu
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            gcc-arm-none-eabi gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf qemu-user rsync
+
+      - name: Run tests
+        run: bash tests/gba-roms/run.sh
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Tagged with a hash of the Dockerfile, so a commit that changes it gets
+      # no published image yet and builds its own
+      - name: Prepare build image
+        run: |
+          image="$(bash docker/build-image.sh --pull)"
+          echo "BUILD_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace "$BUILD_IMAGE" \
+            bash docker/ci-build.sh
+          sudo chown -R "$USER" .
+
+      - name: Upload builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpsp3d-${{ github.sha }}
+          path: |
+            gpsp3ds/out/gpsp3d.cia
+            gpsp3ds/out/gpsp3d.3dsx
+            iconmaker/out/iconmaker.cia
+            iconmaker/out/iconmaker.3dsx
+
+  # Builds from main as a "nightly" pre-release: release files can be
+  # downloaded without a GitHub account, unlike the run's artifacts. Only on
+  # pushes to main, since PR runs from forks may not write releases. The tag
+  # moves to each new commit and the files and notes are replaced.
+  nightly:
+    name: Nightly Pre-release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One at a time, newest last, so an older run can't overwrite a newer build
+    concurrency:
+      group: nightly
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      DL: ${{ github.server_url }}/${{ github.repository }}/releases/download/nightly
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v4
+        with:
+          name: gpsp3d-${{ github.sha }}
+
+      - name: Move the nightly tag to this commit
+        run: |
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/nightly" -f sha="$GITHUB_SHA" -F force=true >/dev/null \
+            || gh api -X POST "repos/$GH_REPO/git/refs" -f ref=refs/tags/nightly -f sha="$GITHUB_SHA" >/dev/null
+
+      - name: FBI install QR codes
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qrencode
+          # FBI's "Scan QR Code" remote install expects the plain URL of the .cia
+          qrencode -o gpsp3d-QR.png -s 8 -m 3 -l M "$DL/gpsp3d.cia"
+          qrencode -o iconmaker-QR.png -s 8 -m 3 -l M "$DL/iconmaker.cia"
+
+      - name: Update the pre-release
+        run: |
+          short="${GITHUB_SHA::7}"
+          {
+            echo "Automatic build of \`main\` at ${{ github.server_url }}/$GH_REPO/commit/$GITHUB_SHA ($(date -u '+%Y-%m-%d %H:%M UTC'))."
+            echo
+            echo 'For testing: it has everything merged so far, including changes not in a release yet. Replaced by every push to `main`.'
+            echo
+            echo '## Install on your 3DS'
+            echo
+            echo 'Open **FBI** -> **Remote Install** -> **Scan QR Code**, then scan:'
+            echo
+            echo '| gpSP 3D | Icon Maker |'
+            echo '| :---: | :---: |'
+            echo "| <img src=\"$DL/gpsp3d-QR.png\" alt=\"QR code to install the gpSP 3D nightly with FBI\" width=\"220\"> | <img src=\"$DL/iconmaker-QR.png\" alt=\"QR code to install the Icon Maker nightly with FBI\" width=\"220\"> |"
+            echo "| [\`gpsp3d.cia\`]($DL/gpsp3d.cia) | [\`iconmaker.cia\`]($DL/iconmaker.cia) |"
+          } > notes.md
+          # Releases made with GITHUB_TOKEN start no workflows, so this doesn't run release.yml
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly --title "Nightly ($short)" --notes-file notes.md --prerelease --latest=false
+          else
+            gh release create nightly --title "Nightly ($short)" --notes-file notes.md --prerelease --latest=false --verify-tag
+          fi
+          gh release upload nightly --clobber \
+            gpsp3ds/out/gpsp3d.cia gpsp3ds/out/gpsp3d.3dsx \
+            iconmaker/out/iconmaker.cia iconmaker/out/iconmaker.3dsx \
+            gpsp3d-QR.png iconmaker-QR.png

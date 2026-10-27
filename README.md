@@ -65,6 +65,10 @@ raise the 3D slider. No RetroArch needed.
    **3DSX:** copy it to `sdmc:/3ds/` and start it from the Homebrew Launcher.
 3. Start gpSP 3D, browse to your games on the bottom screen and tap one.
 
+To try changes before they are released, the [Nightly](../../releases/tag/nightly)
+pre-release has the latest build of `main`, with QR codes for FBI. It is
+replaced by every change, so it can be less stable than a release.
+
 ## Using it
 
 - **GBA controls:** A, B, L, R, Start, Select, D-pad / Circle Pad.
@@ -191,7 +195,14 @@ bash gpsp3ds/build-gpsp3ds.sh
 bash iconmaker/build-iconmaker.sh
 ```
 
-The image is defined in `docker/gpsp3d-devcontainer.Dockerfile`.
+The image is defined in `docker/gpsp3d-devcontainer.Dockerfile`; CI uses the
+published copy tagged with a hash of that file (`bash docker/build-image.sh`).
+`bash docker/ci-build.sh` builds both apps and checks a forwarder made by Icon
+Maker, the same test build GitHub Actions runs for every pull request and every
+push to `main`.
+
+The `nightly` tag moves with every push to `main`, so `git pull` may stop with
+`would clobber existing tag`; `git fetch --tags --force` fixes it.
 
 ### What changed in the core
 
