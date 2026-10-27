@@ -161,7 +161,8 @@ bash gpsp3ds/build-gpsp3ds.sh
 bash iconmaker/build-iconmaker.sh
 ```
 
-The image is defined in `docker/gpsp3d-devcontainer.Dockerfile`.
+The image is defined in `docker/gpsp3d-devcontainer.Dockerfile`; CI uses the
+published copy tagged with a hash of that file (`bash docker/build-image.sh`).
 `bash docker/ci-build.sh` builds both apps and checks a forwarder made by Icon
 Maker, the same test build GitHub Actions runs for every pull request and every
 push to `main`.
