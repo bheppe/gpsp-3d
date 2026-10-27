@@ -40,6 +40,9 @@ raise the 3D slider. No RetroArch needed.
 - **Screen effects**: Scanlines and LCD grid (Display -> Screen effect).
 - **HOME Menu icons per game** (forwarders), made right on the 3DS with
   **Icon Maker** (GBA and SNES games), or on a PC. See below.
+- **Game guides on the bottom screen** while you play (a `.txt` next to the
+  game).
+- **Fast forward** (Y) and **zipped games**.
 - **Saves are shared with RetroArch.** Saves go to RetroArch's save folder if
   it exists, so you can switch between the two.
 
@@ -71,8 +74,15 @@ raise the 3D slider. No RetroArch needed.
 - **Zipped games** (`.zip`) work: the game is unzipped once to
   `sdmc:/3ds/gpsp3d/unzipped/` (the last one played is kept, so starting it again
   is instant). Saves are still named after the zip and kept next to it.
+- **Guides:** put a plain-text guide (a walkthrough or FAQ saved as `.txt`) next
+  to the game with the same name (`Pokemon Emerald.gba` -> `Pokemon Emerald.txt`),
+  or in `sdmc:/3ds/gpsp3d/guides/`. Then **Game -> Show guide** shows it on the
+  bottom screen while you play: drag to scroll, drag the bar on the right to
+  jump, **Page up / Page down** at the bottom, **Menu** at the top right opens
+  the menu. It remembers where you were, and whether it was open, per game.
+  Guides up to 3 MB; accented letters and fancy quotes show as plain ones.
 - **Menu:** tap the bottom screen while playing. Tabs:
-  **Game** (save/load state, slot, reset, quit), **Display** (screen size,
+  **Game** (save/load state, slot, reset, guide, quit), **Display** (screen size,
   scaling, color), **3D** (effect, strength, layer style, per-layer depths,
   sprite pop, focus, floor tilt, smart layers), **Speed** (frame skip, audio when slow,
   fast forward, stats) and **System** (core 2 drawing, GPU display, core 2 priority,

@@ -23,6 +23,7 @@
 #include "ui.h"
 #include "ui_screens.h"
 #include "unzip.h"
+#include "guide.h"
 
 /* gpSP takes up to 32 MB of the normal heap for ROM blocks, so keep the linear
  * heap (only needed for framebuffers and audio) small. */
@@ -1931,6 +1932,7 @@ static bool game_load(void)
    gyro_on = gpsp_gyro_present() && R_SUCCEEDED(HIDUSER_EnableGyroscope());
    sram_load();
    profile_load_fwd();
+   guide_open(rom_path, rom_name, APP_DIR);
    return true;
 }
 
@@ -1939,6 +1941,7 @@ static void game_unload(void)
    if (!game_loaded)
       return;
    sram_flush(true);
+   guide_close();
    retro_unload_game();
    game_loaded = false;
    if (gyro_on)
@@ -2182,7 +2185,7 @@ static void preview_refresh(void)
 enum {
    M_NONE,
    /* Game */
-   M_RESUME, M_SLOT, M_SAVE, M_LOAD, M_RESET, M_LIST, M_QUIT,
+   M_RESUME, M_SLOT, M_SAVE, M_LOAD, M_RESET, M_GUIDE, M_LIST, M_QUIT,
    /* Display */
    M_SIZE, M_SMOOTH, M_CRT, M_CSTYLE, M_SAT, M_BRIGHT, M_COLRESET,
    /* 3D */
@@ -2255,6 +2258,17 @@ static void menu_build(int tab)
          mrows[mrow_n - 1].r.disabled = !state_exists(opt_slot);
          mrow_add(M_RESET, ROW_ACTION, "Reset game", "Restart the game, like switching the\nGBA off and on.");
          mrows[mrow_n - 1].r.danger = 1;
+         if (guide_available())
+         {
+            mrow_add(M_GUIDE, ROW_ACTION, guide_shown ? "Hide guide" : "Show guide",
+                  guide_shown ? "Back to the speed and 3D panel." :
+                  "Read this game's guide (a .txt file)\non the bottom screen while you play.");
+         }
+         else if (guide_error())
+         {
+            mrow_add(M_GUIDE, ROW_ACTION, "Show guide", guide_error());
+            mrows[mrow_n - 1].r.disabled = 1;
+         }
          mrow_add(M_LIST, ROW_ACTION, "Back to game list", "Close this game (its save is kept)\nand choose another.");
          mrow_add(M_QUIT, ROW_ACTION, "Quit gpSP 3D", "Close the game and the app.");
          mrows[mrow_n - 1].r.danger = 1;
@@ -2664,6 +2678,10 @@ static bool game_menu(void)
             {
                case M_RESUME:
                   goto resume;
+               case M_GUIDE:
+                  guide_shown = !guide_shown;
+                  guide_save_pos();
+                  goto resume;
                case M_SAVE:
                   if (state_save())
                      snprintf(note, sizeof(note), "Saved to slot %d", opt_slot);
@@ -2925,7 +2943,7 @@ static void run_game(void)
    u32 prev_underruns = audio_underruns, prev_drops = audio_drops;
    (void)prev_drops;
    u32 frames = 0, frames_total = 0, drawn_win = 0, ff_extra_win = 0;
-   bool ff_shown = false, hud_now = false;
+   bool ff_shown = false, hud_now = false, open_menu, guide_dirty = false;
 
    {
       ui_hud h;
@@ -2933,7 +2951,10 @@ static void run_game(void)
       h.title = rom_name;
       h.fps = 60;
       h.pictures = 60;
-      scr_hud(&h);
+      if (guide_shown)
+         guide_draw();
+      else
+         scr_hud(&h);
       ui_present();
    }
    stereo_apply();
@@ -2952,11 +2973,35 @@ static void run_game(void)
       hidScanInput();
       keys_held = hidKeysHeld();
       gyro_update();
-      if (hidKeysDown() & KEY_TOUCH)
+      open_menu = (hidKeysDown() & KEY_TOUCH) != 0;
+      if (guide_shown)
+      {
+         /* the guide takes the touches: drag to scroll, Menu opens the menu */
+         touchPosition tp;
+         int r = 0;
+         if (hidKeysDown() & KEY_TOUCH)
+         {
+            hidTouchRead(&tp);
+            r = guide_touch(GUIDE_TOUCH_DOWN, tp.px, tp.py);
+         }
+         else if (keys_held & KEY_TOUCH)
+         {
+            hidTouchRead(&tp);
+            r = guide_touch(GUIDE_TOUCH_HELD, tp.px, tp.py);
+         }
+         else if (hidKeysUp() & KEY_TOUCH)
+            r = guide_touch(GUIDE_TOUCH_UP, 0, 0);
+         open_menu = r == GUIDE_MENU;
+         if (r == GUIDE_REDRAW)
+            guide_dirty = true;
+      }
+      if (open_menu)
       {
          frame_present_deferred();
+         guide_save_pos();
          if (!game_menu())
             return;
+         guide_dirty = guide_shown;
          clear_top();
          skip_phase = 0;
          t_frame0 = t_win0 = svcGetSystemTick();
@@ -3078,6 +3123,13 @@ static void run_game(void)
       if (frames_total == 180)
          gpu_guard_clear();   /* 3 seconds of frames: the GPU display works */
 
+      if (guide_dirty)
+      {
+         guide_draw();
+         ui_present();
+         guide_dirty = false;
+      }
+
       if (frames == 60 || hud_now)
       {
          u64 now  = svcGetSystemTick();
@@ -3124,8 +3176,11 @@ static void run_game(void)
             h.stat_label[5] = "Emulator";
             snprintf(h.stat_value[5], 40, "%.38s", core_msg);
             h.nstats = core_msg[0] ? 6 : 5;
-            scr_hud(&h);
-            ui_present();
+            if (!guide_shown)
+            {
+               scr_hud(&h);
+               ui_present();
+            }
          }
          prev_underruns = audio_underruns;
          prev_drops     = audio_drops;

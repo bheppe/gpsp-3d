@@ -35,6 +35,7 @@ What's been reported, what's done, and what's next. Reports come from
 | v0.1.4 | **Fast forward** on Y (hold or toggle), Max / 2x / 3x / 4x | 🧪 |
 | v0.1.4 | **Zipped games work** (#6: a .zip was loaded as if it were the ROM, which hung, then crashed): unzipped once to a cache on the SD card | 🧪 |
 | v0.1.4 | **System -> Save file** shows where the current game's save is | 🧪 |
+| v0.1.4 | **Guide viewer**: a game's `.txt` guide on the bottom screen while playing (Game -> Show guide); drag or page to scroll, place remembered per game | 🧪 (cabjoy) |
 
 ## Open
 
