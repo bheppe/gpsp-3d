@@ -172,6 +172,9 @@ published copy tagged with a hash of that file (`bash docker/build-image.sh`).
 Maker, the same test build GitHub Actions runs for every pull request and every
 push to `main`.
 
+The `nightly` tag moves with every push to `main`, so `git pull` may stop with
+`would clobber existing tag`; `git fetch --tags --force` fixes it.
+
 ### What changed in the core
 
 - `video_thread.cc` / `video_thread_sys.c`: a threaded renderer. The main core
