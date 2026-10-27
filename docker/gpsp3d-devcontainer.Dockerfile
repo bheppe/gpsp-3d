@@ -1,10 +1,13 @@
 # Build image for gpSP 3D: devkitARM with the 3DS packages, plus bannertool and
 # makerom for the CIAs. Used by .devcontainer/devcontainer.json; GitHub Actions
-# can build in the same image. Everything is pinned (devkitARM tag, bannertool
-# and makerom commits), so rebuilding it cannot silently change the toolchain.
-ARG DEVKITARM_TAG=20260610
+# can build in the same image. The toolchain is pinned, so rebuilding the image
+# cannot silently change it: devkitARM by digest (its image already has 3ds-dev:
+# libctru, citro3d, picasso, 3dsxtool, smdhtool, raw2c), bannertool and makerom
+# by commit. To update devkitARM, take a newer tag from
+# https://hub.docker.com/r/devkitpro/devkitarm/tags and its index digest.
+ARG DEVKITARM_IMAGE=docker.io/devkitpro/devkitarm:20260610@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
 
-FROM docker.io/devkitpro/devkitarm:${DEVKITARM_TAG} AS tools-builder
+FROM ${DEVKITARM_IMAGE} AS tools-builder
 
 ARG BANNERTOOL_REF=734d33be79fd3f8c29c6296158f06ac7c5ca9dcb
 ARG PROJECT_CTR_REF=d52c2b0e788c2d085763d7c5dcc4b2edd9ffb7d8
@@ -27,10 +30,7 @@ RUN git clone https://github.com/3DSGuy/Project_CTR.git /tmp/Project_CTR \
     && make -C /tmp/Project_CTR/makerom -j$(nproc) \
     && install -m755 /tmp/Project_CTR/makerom/bin/makerom /usr/local/bin/makerom
 
-FROM docker.io/devkitpro/devkitarm:${DEVKITARM_TAG}
-
-# 3ds-dev: libctru, citro3d, picasso, 3dsxtool, smdhtool, raw2c
-RUN dkp-pacman -Sy --noconfirm 3ds-dev && dkp-pacman -Scc --noconfirm
+FROM ${DEVKITARM_IMAGE}
 
 # Host tools: a native compiler and Python for the PC tests (iconmaker/test) and
 # gpsp3ds/tools/make_font.py, plus git, gh and ssh for working in the container.
