@@ -37,29 +37,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Image name
-        run: echo "BUILD_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gpsp3d-devcontainer:latest" >> "$GITHUB_ENV"
-
-      # The published image is only rebuilt on pushes to main, and in parallel
-      # with this run, so a PR or push that changes the image has to build it
-      # here; pulling would test against the old toolchain.
+      # Tagged with a hash of the Dockerfile, so a commit that changes it gets
+      # no published image yet and builds its own
       - name: Prepare build image
         run: |
-          case "${{ github.event_name }}" in
-            pull_request) changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")" ;;
-            push)         changed="$(git diff --name-only "${{ github.event.before }}" HEAD 2>/dev/null || echo docker/gpsp3d-devcontainer.Dockerfile)" ;;
-            *)            changed= ;;
-          esac
-          if echo "$changed" | grep -qx 'docker/gpsp3d-devcontainer.Dockerfile'; then
-            echo "Dockerfile changed: building the image here"
-            docker build -f docker/gpsp3d-devcontainer.Dockerfile -t "$BUILD_IMAGE" .
-          else
-            docker pull "$BUILD_IMAGE" \
-              || docker build -f docker/gpsp3d-devcontainer.Dockerfile -t "$BUILD_IMAGE" .
-          fi
+          image="$(bash docker/build-image.sh --pull)"
+          echo "BUILD_IMAGE=$image" >> "$GITHUB_ENV"
 
       - name: Build
         run: |
