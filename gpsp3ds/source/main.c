@@ -1970,6 +1970,7 @@ static void make_paths(void)
    const char *dot;
    char rom_dir[512];
    char try_path[600];
+   bool beside;
    size_t dl = slash ? (size_t)(slash - rom_path + 1) : 0;
 
    snprintf(rom_name, sizeof(rom_name), "%s", slash ? slash + 1 : rom_path);
@@ -1981,9 +1982,15 @@ static void make_paths(void)
    /* Saves live where RetroArch keeps them (so saves carry over between the
     * two), unless the game already has a save next to the ROM. */
    snprintf(try_path, sizeof(try_path), "%s%s.srm", rom_dir, rom_name);
-   if (!file_exists(try_path) && dir_exists(RA_SAVE_DIR))
+   beside = file_exists(try_path);
+   if (!beside && opt_save_ext[0])   /* e.g. an mGBA .sav next to the game */
+   {
+      snprintf(try_path, sizeof(try_path), "%s%s.%s", rom_dir, rom_name, opt_save_ext);
+      beside = file_exists(try_path);
+   }
+   if (!beside && dir_exists(RA_SAVE_DIR))
       snprintf(old_save_dir, sizeof(old_save_dir), "%s", RA_SAVE_DIR);
-   else if (!file_exists(try_path) && dir_exists(RA_SAVE_DIR2))
+   else if (!beside && dir_exists(RA_SAVE_DIR2))
       snprintf(old_save_dir, sizeof(old_save_dir), "%s", RA_SAVE_DIR2);
    else
       snprintf(old_save_dir, sizeof(old_save_dir), "%.*s", (int)(dl ? dl - 1 : 0), rom_path);
@@ -2502,7 +2509,8 @@ static void menu_build(int tab)
             snprintf(where, sizeof(where), "%.*s/\n%s", slash ? (int)(slash - save_path) : 0, save_path,
                      slash ? slash + 1 : save_path);
             mrow_add(M_SAVEINFO, ROW_INFO, "Save file", where);
-            mrows[mrow_n - 1].r.value = ra ? "RetroArch folder" : "Next to the game";
+            mrows[mrow_n - 1].r.value = opt_save_dir[0] ? "Your save folder" :
+                                        ra ? "RetroArch folder" : "Next to the game";
          }
          snprintf(about, sizeof(about), "gpSP 3D " GPSP3D_VERSION);
          mrow_add(M_ABOUT, ROW_INFO, "Version", "gpSP (libretro, GPL-2), mGBA 3DS GPU\ncode (MPL-2.0), Inter font (OFL).");

@@ -94,7 +94,9 @@ raise the 3D slider. No RetroArch needed.
   - `sdmc:/3ds/gpsp3d/gpsp3d.cfg`: settings
   - `sdmc:/3ds/gpsp3d/games/<game>.cfg`: per-game 3D profiles
   - Game saves (`.srm`) and states (`.state1` ...): RetroArch's save folder
-    if present, otherwise next to the ROM
+    if present, otherwise next to the ROM. A game that already has a save next
+    to it (`.srm`, or `.sav` with `save_ext=sav`) keeps using that one.
+    **System -> Save file** shows where the current game's save is.
 - **Own save folder:** to share saves with mGBA or open_agb_firm, set these
   in `gpsp3d.cfg` (empty = as above):
 
