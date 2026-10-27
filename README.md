@@ -62,6 +62,10 @@ raise the 3D slider. No RetroArch needed.
    **3DSX:** copy it to `sdmc:/3ds/` and start it from the Homebrew Launcher.
 3. Start gpSP 3D, browse to your games on the bottom screen and tap one.
 
+To try changes before they are released, the [Nightly](../../releases/tag/nightly)
+pre-release has the latest build of `main`, with QR codes for FBI. It is
+replaced by every change, so it can be less stable than a release.
+
 ## Using it
 
 - **GBA controls:** A, B, L, R, Start, Select, D-pad / Circle Pad.
