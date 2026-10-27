@@ -66,6 +66,11 @@ To try changes before they are released, the [Nightly](../../releases/tag/nightl
 pre-release has the latest build of `main`, with QR codes for FBI. It is
 replaced by every change, so it can be less stable than a release.
 
+With [Universal-Updater](https://github.com/Universal-Team/Universal-Updater),
+add the gpSP 3D store from the [project page](https://bheppe.github.io/gpsp-3d/)
+(QR code). It has gpSP 3D, Icon Maker and Snes9x 3D, and shows when there are
+updates.
+
 ## Using it
 
 - **GBA controls:** A, B, L, R, Start, Select, D-pad / Circle Pad.

@@ -1,0 +1,95 @@
+<!doctype html>
+<!--
+  docs/ is the root of the GitHub Pages site (.github/workflows/pages.yml copies
+  it as is). Documentation pages go here next to this one. The workflow adds
+  unistore/ (the Universal-Updater store, its icons and QR code) at deploy time,
+  so don't put files there.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gpSP 3D</title>
+  <meta name="description" content="Game Boy Advance and SNES games in stereoscopic 3D on the Nintendo 3DS.">
+  <style>
+    :root {
+      --bg: #f7f7f8; --fg: #1d1d21; --muted: #5d5d66; --card: #ffffff;
+      --line: #dddde3; --accent: #3a5bd9;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16161a; --fg: #ececf1; --muted: #a2a2ad; --card: #202026;
+        --line: #33333b; --accent: #8ea4ff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 44rem; margin: 0 auto; padding: 2.5rem 1rem 3rem; }
+    h1 { font-size: 2rem; margin: 0 0 .25rem; }
+    h2 { font-size: 1.2rem; margin: 0 0 .75rem; }
+    p { margin: 0 0 1rem; }
+    .lead { color: var(--muted); font-size: 1.1rem; margin-bottom: 2rem; }
+    a { color: var(--accent); }
+    section {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 1.25rem; margin-bottom: 1rem;
+    }
+    .store { display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap; }
+    .store img {
+      width: 180px; height: 180px; image-rendering: pixelated;
+      background: #fff; border-radius: 8px;
+    }
+    .store div { flex: 1 1 16rem; min-width: 0; }
+    code { overflow-wrap: anywhere; font-size: .9em; }
+    ul { margin: 0; padding-left: 1.2rem; }
+    li { margin: .25rem 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>gpSP 3D</h1>
+    <p class="lead">Game Boy Advance games in stereoscopic 3D on the Nintendo 3DS,
+      with every background layer and sprite at its own depth.
+      Its sibling, Snes9x 3D, does the same for SNES games.</p>
+
+    <section>
+      <h2>Install with Universal-Updater</h2>
+      <div class="store">
+        <img src="unistore/gpsp3d-unistore-QR.png" alt="QR code to add the gpSP 3D store to Universal-Updater">
+        <div>
+          <p>In <a href="https://github.com/Universal-Team/Universal-Updater">Universal-Updater</a>,
+            open <b>Settings</b> → <b>Select a UniStore</b> → <b>+</b> and scan this
+            QR code, or enter the address below. The store has gpSP 3D, Icon Maker
+            and Snes9x 3D, and tells you when there are updates.</p>
+          <p><code id="store-url">unistore/gpsp3d.unistore</code></p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Downloads</h2>
+      <ul>
+        <li><a href="https://github.com/bheppe/gpsp-3d/releases">gpSP 3D and Icon Maker releases</a></li>
+        <li><a href="https://github.com/bheppe/gpsp-3d/releases/tag/nightly">Nightly build</a> of the newest changes, for testing</li>
+        <li><a href="https://github.com/bheppe/snes9x_3ds/releases">Snes9x 3D releases</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>More</h2>
+      <ul>
+        <li><a href="https://github.com/bheppe/gpsp-3d#readme">Features, setup and building</a></li>
+        <li><a href="https://discord.gg/pBWY3fRgnU">Discord</a>: help, game reports, test builds</li>
+      </ul>
+    </section>
+  </main>
+  <script>
+    // The full store address, whatever domain the site is served from
+    document.getElementById('store-url').textContent =
+      new URL('unistore/gpsp3d.unistore', location.href).href;
+  </script>
+</body>
+</html>
