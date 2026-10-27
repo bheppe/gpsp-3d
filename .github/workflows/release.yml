@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  # The app shows GPSP3D_VERSION and the CIA carries the version from the build
+  # script, so a tag that disagrees with either ships a build that misreports
+  # itself. Checked first, so a mismatch fails before anything is uploaded.
+  version:
+    name: Version Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Tag matches the sources
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app="$(sed -n 's/^#define[[:space:]]*GPSP3D_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' gpsp3ds/source/ui_screens.h)"
+          cia="$(sed -n 's/.*-major \([0-9]*\) -minor \([0-9]*\) -micro \([0-9]*\).*/\1.\2.\3/p' gpsp3ds/build-gpsp3ds.sh)"
+          echo "release tag:                $tag (${GITHUB_REF_NAME})"
+          echo "ui_screens.h GPSP3D_VERSION: ${app:-<not found>}"
+          echo "build-gpsp3ds.sh CIA:        ${cia:-<not found>}"
+          fail=0
+          if [ "$app" != "$tag" ]; then
+            echo "::error file=gpsp3ds/source/ui_screens.h::GPSP3D_VERSION \"$app\" does not match tag ${GITHUB_REF_NAME}."
+            fail=1
+          fi
+          if [ "$cia" != "$tag" ]; then
+            echo "::error file=gpsp3ds/build-gpsp3ds.sh::makerom -major/-minor/-micro ($cia) does not match tag ${GITHUB_REF_NAME}."
+            fail=1
+          fi
+          exit $fail
+
+  build-and-upload:
+    name: Build and Upload
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+      DL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare build image
+        run: |
+          BUILD_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gpsp3d-devcontainer:latest"
+          echo "BUILD_IMAGE=$BUILD_IMAGE" >> "$GITHUB_ENV"
+          docker pull "$BUILD_IMAGE" || docker build -f docker/gpsp3d-devcontainer.Dockerfile -t "$BUILD_IMAGE" .
+
+      - name: Build
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace "$BUILD_IMAGE" \
+            bash docker/ci-build.sh
+          sudo chown -R "$USER" .
+
+      # Same names as before (gpsp3d.cia, ...), so releases/latest/download links keep working
+      - name: Upload release assets
+        run: |
+          gh release upload "$TAG" --clobber \
+            gpsp3ds/out/gpsp3d.cia gpsp3ds/out/gpsp3d.3dsx \
+            iconmaker/out/iconmaker.cia iconmaker/out/iconmaker.3dsx
+
+      - name: FBI install QR codes
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qrencode
+          # FBI's "Scan QR Code" remote install expects the plain URL of the .cia
+          qrencode -o gpsp3d-QR.png -s 8 -m 3 -l M "$DL/gpsp3d.cia"
+          qrencode -o iconmaker-QR.png -s 8 -m 3 -l M "$DL/iconmaker.cia"
+          gh release upload "$TAG" --clobber gpsp3d-QR.png iconmaker-QR.png
+
+      - name: Add QR codes to the release notes
+        run: |
+          # Drop a block from an earlier run, so re-runs replace it instead of stacking
+          gh release view "$TAG" --json body -q .body > body.md
+          sed -n '/<!-- gpsp3d-qr:start -->/q;p' body.md > notes.md
+          # Command substitution drops trailing newlines, so re-runs don't add blank lines
+          printf '%s\n' "$(cat notes.md)" > notes.md
+          {
+            echo
+            echo '<!-- gpsp3d-qr:start -->'
+            echo '## Install on your 3DS'
+            echo
+            echo 'Open **FBI** -> **Remote Install** -> **Scan QR Code**, then scan:'
+            echo
+            echo '| gpSP 3D | Icon Maker |'
+            echo '| :---: | :---: |'
+            echo "| <img src=\"$DL/gpsp3d-QR.png\" alt=\"QR code to install gpSP 3D $TAG with FBI\" width=\"220\"> | <img src=\"$DL/iconmaker-QR.png\" alt=\"QR code to install Icon Maker $TAG with FBI\" width=\"220\"> |"
+            echo "| [\`gpsp3d.cia\`]($DL/gpsp3d.cia) | [\`iconmaker.cia\`]($DL/iconmaker.cia) |"
+            echo '<!-- gpsp3d-qr:end -->'
+          } >> notes.md
+          gh release edit "$TAG" --notes-file notes.md
