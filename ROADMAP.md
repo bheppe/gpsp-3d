@@ -49,6 +49,7 @@ What's been reported, what's done, and what's next. Reports come from
 | 15 | In-app About screen crediting gpSP's authors | bheppe | 📋 |
 | 16 | Per-layer 3D for other emulators (PS1 / PCSX) | _SleepyLark_, LargoLaGrande1, goldaxis | 💤 |
 | 17 | Smashing Drive: 60-70% speed on Old 3DS (software 3D) | Advil Lavs (Discord) | 🔧 needs a profile log from a race |
+| 18 | **Own save / state folder and `.sav` saves** (`save_dir`, `state_dir`, `save_ext` in `gpsp3d.cfg`), to share saves with mGBA and open_agb_firm | michvllni (#7) | 🧪 `.sav` files have the real save size; old saves are still found |
 
 Tip while waiting for fixes: if the stats panel says **Core 2: off (drawing on main core)**, turn on
 **System → Draw on core 2**; drawing on the main core costs a lot of speed.

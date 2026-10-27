@@ -78,6 +78,21 @@ raise the 3D slider. No RetroArch needed.
   - `sdmc:/3ds/gpsp3d/games/<game>.cfg`: per-game 3D profiles
   - Game saves (`.srm`) and states (`.state1` ...): RetroArch's save folder
     if present, otherwise next to the ROM
+- **Own save folder:** to share saves with mGBA or open_agb_firm, set these
+  in `gpsp3d.cfg` (empty = as above):
+
+  ```
+  save_dir=sdmc:/3ds/open_agb_firm/saves
+  state_dir=sdmc:/3ds/gpsp3d/states
+  save_ext=sav
+  ```
+
+  The folders are created if missing, and states go with the saves unless
+  `state_dir` is set. A game's save that isn't in the new folder yet is
+  loaded from the old place (the old file is kept) and written to the new
+  folder the next time the game saves. With an extension other than `srm`,
+  files have the cartridge's real save size (32 KB SRAM, 64/128 KB flash,
+  512 B / 8 KB EEPROM) like mGBA's. States don't move: copy them over.
 
 If the app ever freezes while starting the GPU display, the next launch shows
 a message and turns **System -> GPU display** off, so you can always get back
