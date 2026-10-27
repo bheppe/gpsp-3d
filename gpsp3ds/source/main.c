@@ -22,6 +22,7 @@
 #include "ctr-gpu.h"
 #include "ui.h"
 #include "ui_screens.h"
+#include "unzip.h"
 
 /* gpSP takes up to 32 MB of the normal heap for ROM blocks, so keep the linear
  * heap (only needed for framebuffers and audio) small. */
@@ -141,6 +142,10 @@ static u32    sram_hash;
 
 /* settings (saved in gpsp3d.cfg) */
 static int opt_frameskip = 1; /* 0 = off, 1 = auto (skip drawing a frame core 2 can't finish in time) */
+/* Fast forward (Y): 0 hold, 1 toggle; speed 0 Max, 1 2x, 2 3x, 3 4x */
+static int opt_ff_toggle = 0;
+static int opt_ff_speed = 0;
+static bool ff_on;               /* toggle mode: fast forward is on */
 static int opt_slot;          /* save-state slot 0..9 */
 static int opt_smooth = 1;    /* scaling (GPU display): 0 Sharp, 1 Crisp, 2 Smooth */
 static int opt_crt;           /* screen effect (GPU display): 0 Off, 1 Scanlines, 2 LCD grid */
@@ -275,6 +280,10 @@ static void config_load(void)
          snprintf(cur_dir, sizeof(cur_dir), "%s", eq);
       else if (!strcmp(line, "frame_skip"))
          opt_frameskip = atoi(eq) ? 1 : 0;
+      else if (!strcmp(line, "ff_toggle"))
+         opt_ff_toggle = atoi(eq) ? 1 : 0;
+      else if (!strcmp(line, "ff_speed"))
+         opt_ff_speed = clampi(atoi(eq), 0, 3);
       else if (!strcmp(line, "profiler"))
          opt_profiler = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "saturation"))
@@ -336,9 +345,11 @@ static void config_save(void)
    if (!f)
       return;
    fprintf(f, "last_dir=%s\nframe_skip=%d\nprofiler=%d\ncolor_style=%d\ncore2=%d\ndisplay=%d\ngpu=%d\n"
-         "slot=%d\nscaling=%d\naudio_stretch=%d\ncore2_low_prio=%d\nsaturation=%d\nbrightness=%d\n3d_gap_fill=%d\nscreen_effect=%d\n",
+         "slot=%d\nscaling=%d\naudio_stretch=%d\ncore2_low_prio=%d\nsaturation=%d\nbrightness=%d\n3d_gap_fill=%d\nscreen_effect=%d\n"
+         "ff_toggle=%d\nff_speed=%d\n",
          cur_dir, opt_frameskip, opt_profiler, opt_colorcorr, opt_core2, opt_display, opt_gpu,
-         opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill, opt_crt);
+         opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill, opt_crt,
+         opt_ff_toggle, opt_ff_speed);
    /* the all-games 3D settings (a game with its own profile keeps them aside) */
    d3_write(f, d3_pergame ? &d3_global : &d3);
    fclose(f);
@@ -1882,12 +1893,36 @@ static void gyro_update(void)
    }
 }
 
+/* the gpSP core loads only plain ROM files: a .zip is unpacked first (to a
+ * cache on the SD card; saves are still named and placed after the zip) */
+static char load_err[200];
+
+static void unzip_message(uint32_t size)
+{
+   char body[96];
+   snprintf(body, sizeof(body), "%s\n%.1f MB, once: starting it again is instant.",
+            rom_name, size / 1048576.0);
+   scr_message("Unzipping the game...", body, NULL);
+   ui_present();
+}
+
 static bool game_load(void)
 {
    struct retro_game_info info;
+   static char unzipped[700];
+   const char *ext;
    make_paths();
    memset(&info, 0, sizeof(info));
    info.path = rom_path;
+   load_err[0] = '\0';
+   ext = strrchr(rom_path, '.');
+   if (ext && !strcasecmp(ext, ".zip"))
+   {
+      if (unzip_rom(rom_path, APP_DIR "/unzipped", rom_name, unzipped, sizeof(unzipped),
+                    unzip_message, load_err, sizeof(load_err)))
+         return false;
+      info.path = unzipped;
+   }
    vars_changed = true;
    if (!retro_load_game(&info))
       return false;
@@ -2153,9 +2188,9 @@ enum {
    /* 3D */
    M_3D, M_3DPCT, M_3DMETHOD, M_3DSMART, M_3DSTYLE, M_L0, M_L1, M_L2, M_L3, M_SPRITE, M_FOCUS, M_TILT, M_GAPFILL, M_PERGAME, M_3DRESET,
    /* Speed */
-   M_SKIP, M_ASTRETCH, M_STATS,
+   M_SKIP, M_ASTRETCH, M_FFMODE, M_FFSPEED, M_STATS,
    /* System */
-   M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_ABOUT,
+   M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_SAVEINFO, M_ABOUT,
    M_HDR
 };
 
@@ -2293,6 +2328,13 @@ static void menu_build(int tab)
       case 3:
          mrow_choice(M_SKIP, "Frame skip", opt_frameskip ? "Auto" : "Off", "Auto: if a frame can't be drawn in time,\nskip drawing it so the game stays at 60.");
          mrow_choice(M_ASTRETCH, "Audio when slow", opt_audio_stretch ? "Stretch" : "Normal", "Stretch: if the game runs slow, slow the\nsound down instead of crackling.");
+         {
+            static const char *speeds[4] = { "Max", "2x", "3x", "4x" };
+            mrow_choice(M_FFMODE, "Fast forward (Y)", opt_ff_toggle ? "Toggle" : "Hold",
+                        "Hold: fast while Y is held.\nToggle: Y turns it on and off.");
+            mrow_choice(M_FFSPEED, "Fast forward speed", speeds[opt_ff_speed],
+                        "Max: as fast as the 3DS can go (light\ngames: 2-4x on Old 3DS, more on New).");
+         }
          mrow_toggle(M_STATS, "Show stats", opt_profiler, "Timing numbers on this screen while\nplaying.");
          break;
       case 4:
@@ -2303,6 +2345,19 @@ static void menu_build(int tab)
          mrow_choice(M_PRIO, "Core 2 priority", opt_lowprio ? "Low" : "High", "High (recommended): drawing first.\nLow: system services on core 2 first.");
          mrow_add(M_C2TEST, ROW_ACTION, "Core 2 speed test", "Measures how much of core 2 this app\ngets (takes 3 seconds).");
          mrows[mrow_n - 1].r.value = core2_result[0] ? core2_result : NULL;
+         if (save_path[0])
+         {
+            /* where this game's save is: the folder, and the full path
+             * (folder / file on two lines) in the help line */
+            static char where[600];
+            const char *slash = strrchr(save_path, '/');
+            bool ra = !strncmp(save_path, RA_SAVE_DIR "/", strlen(RA_SAVE_DIR) + 1) ||
+                      !strncmp(save_path, RA_SAVE_DIR2 "/", strlen(RA_SAVE_DIR2) + 1);
+            snprintf(where, sizeof(where), "%.*s/\n%s", slash ? (int)(slash - save_path) : 0, save_path,
+                     slash ? slash + 1 : save_path);
+            mrow_add(M_SAVEINFO, ROW_INFO, "Save file", where);
+            mrows[mrow_n - 1].r.value = ra ? "RetroArch folder" : "Next to the game";
+         }
          snprintf(about, sizeof(about), "gpSP 3D " GPSP3D_VERSION);
          mrow_add(M_ABOUT, ROW_INFO, "Version", "gpSP (libretro, GPL-2), mGBA 3DS GPU\ncode (MPL-2.0), Inter font (OFL).");
          mrows[mrow_n - 1].r.value = about;
@@ -2403,6 +2458,8 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
          break;
       case M_SKIP:     opt_frameskip ^= 1; break;
       case M_ASTRETCH: opt_audio_stretch ^= 1; break;
+      case M_FFMODE:   opt_ff_toggle ^= 1; ff_on = false; break;
+      case M_FFSPEED:  CYCLEV(opt_ff_speed, 4); break;
       case M_STATS:    opt_profiler ^= 1; vars_changed = true; break;
       case M_CORE2:
          opt_core2 ^= 1;
@@ -2867,7 +2924,8 @@ static void run_game(void)
    u64 c2_draw_us = 0, c2_copy_us = 0, c2_wait_us = 0;
    u32 prev_underruns = audio_underruns, prev_drops = audio_drops;
    (void)prev_drops;
-   u32 frames = 0, frames_total = 0, drawn_win = 0;
+   u32 frames = 0, frames_total = 0, drawn_win = 0, ff_extra_win = 0;
+   bool ff_shown = false, hud_now = false;
 
    {
       ui_hud h;
@@ -2940,6 +2998,41 @@ static void run_game(void)
          emu_ms_avg += (emu - emu_ms_avg) * 0.05f;
       }
 
+      /* Fast forward (Y): run extra frames without drawing them or playing
+       * their sound. They come after this frame's timing is measured, so
+       * frame skip and audio stretch see a normal frame. The loop is still
+       * paced by the sound, so N-1 extra frames make it N times as fast; at
+       * Max it fills the frame's time with as many as fit. */
+      {
+         bool ff;
+         if (opt_ff_toggle)
+         {
+            if (hidKeysDown() & KEY_Y)
+               ff_on = !ff_on;
+            ff = ff_on;
+         }
+         else
+            ff = (keys_held & KEY_Y) != 0;
+         if (ff)
+         {
+            int extra = 0, want = opt_ff_speed ? opt_ff_speed : 15;
+            u64 budget = t0 + (u64)(TICKS_PER_MS * 15.5);
+            while (extra < want && (opt_ff_speed || svcGetSystemTick() < budget))
+            {
+               gpsp_frontend_skip = 1;
+               retro_run();
+               pending_frames = 0;   /* their sound is dropped */
+               extra++;
+            }
+            ff_extra_win += extra;
+         }
+         if (ff != ff_shown)
+         {
+            ff_shown = ff;
+            hud_now = true;   /* show it on the bottom screen right away */
+         }
+      }
+
       /* Pace to the audio: keep a few buffers queued. When the game can't
        * keep up the queue is already short and we don't wait at all. */
       if (audio_ok)
@@ -2985,22 +3078,29 @@ static void run_game(void)
       if (frames_total == 180)
          gpu_guard_clear();   /* 3 seconds of frames: the GPU display works */
 
-      if (frames == 60)
+      if (frames == 60 || hud_now)
       {
          u64 now  = svcGetSystemTick();
          double ms = (now - t_win0) / TICKS_PER_MS;
-         double fps = 60000.0 / ms;
+         double fps = frames * 1000.0 / ms;
          u32 dw = drawn_win ? drawn_win : 1;
          {
             static ui_hud h;
             memset(&h, 0, sizeof(h));
             h.title = rom_name;
             h.fps = (float)fps;
-            h.pictures = (float)(fps * drawn_win / 60.0);
+            h.pictures = (float)(fps * drawn_win / (frames ? frames : 1));
             h.stereo = stereo_mode && stereo_amount_pct() > 0;
             h.depth_pct = stereo_amount_pct();
             h.show_stats = opt_profiler;
             h.warning = audio_ok ? NULL : "No sound: dspfirm.cdc is missing";
+            if (ff_shown)
+            {
+               static char ffw[48];
+               snprintf(ffw, sizeof(ffw), ">> Fast forward  %.1fx",
+                        frames ? (frames + ff_extra_win) / (double)frames : 1.0);
+               h.warning = ffw;
+            }
             h.stat_label[0] = "Main core";
             snprintf(h.stat_value[0], 40, "emulate %.1f ms   show %.1f ms",
                   (t_core - t_blit_acc) / TICKS_PER_MS / frames - c2_wait_us / 1000.0 / frames,
@@ -3036,6 +3136,8 @@ static void run_game(void)
          t_blit_acc = 0;
          present_us_acc = 0;
          frames = drawn_win = 0;
+         ff_extra_win = 0;
+         hud_now = false;
       }
    }
 }
@@ -3181,7 +3283,8 @@ int main(int argc, char **argv)
       }
       if (!game_load())
       {
-         ui_wait_message("Could not load this game", "The file may be damaged or not a GBA\ngame.");
+         ui_wait_message("Could not load this game", load_err[0] ? load_err :
+                         "The file may be damaged or not a GBA\ngame.");
          continue;
       }
       run_game();
