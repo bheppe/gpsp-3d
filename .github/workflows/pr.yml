@@ -1,0 +1,72 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  # The dynarec checks from tests/gba-roms: the core built for ARM Linux and run
+  # under qemu, compared with the interpreter. They need no devkitPro, so they
+  # run on the plain runner, apart from the build so both report even when one fails.
+  rom-tests:
+    name: Core ROM Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross compilers and qemu
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            gcc-arm-none-eabi gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf qemu-user rsync
+
+      - name: Run tests
+        run: bash tests/gba-roms/run.sh
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Image name
+        run: echo "BUILD_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gpsp3d-devcontainer:latest" >> "$GITHUB_ENV"
+
+      # The published image is only rebuilt on pushes to main, so a PR that
+      # changes the image has to build it here; pulling would test against the
+      # old toolchain.
+      - name: Prepare build image
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ] && git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+               | grep -qx 'docker/gpsp3d-devcontainer.Dockerfile'; then
+            echo "Dockerfile changed in this PR: building the image here"
+            docker build -f docker/gpsp3d-devcontainer.Dockerfile -t "$BUILD_IMAGE" .
+          else
+            docker pull "$BUILD_IMAGE" \
+              || docker build -f docker/gpsp3d-devcontainer.Dockerfile -t "$BUILD_IMAGE" .
+          fi
+
+      - name: Build
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace "$BUILD_IMAGE" \
+            bash docker/ci-build.sh
+          sudo chown -R "$USER" .
+
+      - name: Upload builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpsp3d-${{ github.sha }}
+          path: |
+            gpsp3ds/out/gpsp3d.cia
+            gpsp3ds/out/gpsp3d.3dsx
+            iconmaker/out/iconmaker.cia
+            iconmaker/out/iconmaker.3dsx
