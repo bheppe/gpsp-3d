@@ -58,21 +58,53 @@ raise the 3D slider. No RetroArch needed.
 
 ## Install
 
-1. Download `gpsp3d.cia` (or `gpsp3d.3dsx`) from the
-   [Releases](../../releases) page.
-2. **CIA:** copy it to the SD card and install it with FBI or another CIA
-   installer. It appears on the HOME Menu as **gpSP 3D**.
-   **3DSX:** copy it to `sdmc:/3ds/` and start it from the Homebrew Launcher.
-3. Start gpSP 3D, browse to your games on the bottom screen and tap one.
+There are three ways in. All need a 3DS with custom firmware and FBI or the
+Homebrew Launcher; [3ds.hacks.guide](https://3ds.hacks.guide/) sets that up.
+
+### Universal-Updater (recommended)
+
+<img src="https://bheppe.github.io/gpsp-3d/unistore/gpsp3d-unistore-QR.png" alt="QR code of the gpSP 3D UniStore" width="200" align="right">
+
+1. In [Universal-Updater](https://github.com/Universal-Team/Universal-Updater),
+   open **Settings** -> **Select a UniStore** -> **+**.
+2. Scan the QR code, or type the store address:
+   `https://bheppe.github.io/gpsp-3d/unistore/gpsp3d.unistore`
+3. Select the gpSP 3D store, open the **gpSP 3D** entry and pick a download:
+   - **gpsp3d.cia** installs it to the HOME Menu.
+   - **gpsp3d.3dsx** puts it in the Homebrew Launcher.
+
+The store also has **Icon Maker** and **Snes9x 3D**. New releases show up in
+it by themselves, and an entry is flagged when an update is available.
+Earlier versions stay listed as `[v0.1.3] gpsp3d.cia` and so on, should you
+need to go back.
+
+### FBI
+
+Every [release](../../releases) has QR codes for `gpsp3d.cia` and
+`iconmaker.cia` in its notes. In FBI, choose **Remote Install** ->
+**Scan QR Code** and scan one.
+
+### By hand
+
+Download from the [latest release](../../releases/latest):
+
+- `gpsp3d.cia`: copy it to the SD card and install it with FBI or another CIA
+  installer. It appears on the HOME Menu as **gpSP 3D**.
+- `gpsp3d.3dsx`: copy it to `sdmc:/3ds/` and start it from the Homebrew
+  Launcher.
+
+### After installing
+
+Start gpSP 3D, browse to your games on the bottom screen and tap one.
+
+Updating or reinstalling keeps your settings and per-game profiles: they live
+in `sdmc:/3ds/gpsp3d/` on the SD card, and saves stay where they are (see
+**Files** below).
 
 To try changes before they are released, the [Nightly](../../releases/tag/nightly)
 pre-release has the latest build of `main`, with QR codes for FBI. It is
-replaced by every change, so it can be less stable than a release.
-
-With [Universal-Updater](https://github.com/Universal-Team/Universal-Updater),
-add the gpSP 3D store from the [project page](https://bheppe.github.io/gpsp-3d/)
-(QR code). It has gpSP 3D, Icon Maker and Snes9x 3D, and shows when there are
-updates.
+replaced by every change, so it can be less stable than a release. It is not
+in the store.
 
 ## Using it
 
@@ -138,7 +170,8 @@ Icon Maker does GBA games (opened in gpSP 3D) and SNES games (`.sfc`, `.smc`,
 v1.61-layers6 or newer, installed as a CIA). SNES games get a grey Super
 Nintendo cartridge icon.
 
-1. Install `iconmaker.cia` from the [Releases](../../releases) page with FBI
+1. Install **Icon Maker** from the [store](#universal-updater-recommended),
+   or `iconmaker.cia` from the [Releases](../../releases) page with FBI
    (or run `iconmaker.3dsx` from the Homebrew Launcher).
 2. Open **Icon Maker**, go to your games and press **A** on one. The top screen
    shows the icon and banner it will get; press **A** again to put it on the
