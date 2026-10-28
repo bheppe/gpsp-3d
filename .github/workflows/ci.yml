@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install cross compilers and qemu
         run: |
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Tagged with a hash of the Dockerfile, so a commit that changes it gets
       # no published image yet and builds its own
@@ -52,7 +52,7 @@ jobs:
           sudo chown -R "$USER" .
 
       - name: Upload builds
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gpsp3d-${{ github.sha }}
           path: |
@@ -82,7 +82,7 @@ jobs:
       DL: ${{ github.server_url }}/${{ github.repository }}/releases/download/nightly
     steps:
       - name: Download builds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: gpsp3d-${{ github.sha }}
 
