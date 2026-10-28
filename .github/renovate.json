@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["github-actions", "dockerfile", "custom.regex"],
+  "timezone": "Europe/Berlin",
+  "schedule": ["* * 1 * *"],
+  "prHourlyLimit": 0,
+  "pruneStaleBranches": false,
+  "labels": ["dependencies"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Build tools pinned by commit in the build image: track their branch",
+      "managerFilePatterns": ["/(^|/)[^/]*\\.Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) packageName=(?<packageName>\\S+) branch=(?<currentValue>\\S+)\\s+ARG \\w+=(?<currentDigest>[0-9a-f]{40})"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "commitMessagePrefix": "CI:"
+    },
+    {
+      "matchManagers": ["dockerfile", "custom.regex"],
+      "groupName": "build tools",
+      "separateMajorMinor": false,
+      "commitMessagePrefix": "Build image:"
+    },
+    {
+      "description": "devkitARM tags are dates (YYYYMMDD), not one huge major version",
+      "matchPackageNames": ["/devkitpro/devkitarm$/"],
+      "versioning": "regex:^(?<major>\\d{4})(?<minor>\\d{2})(?<patch>\\d{2})$"
+    }
+  ]
+}
