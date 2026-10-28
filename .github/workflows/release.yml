@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Tag matches the sources
         run: |
@@ -50,7 +50,7 @@ jobs:
       DL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Prepare build image
         # The image of this commit's Dockerfile, as in ci.yml
