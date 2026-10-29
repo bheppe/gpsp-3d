@@ -26,6 +26,7 @@ printf '\n' > "$TMP/romfs/path.txt"
 # picture Icon Maker puts in its place (every icon gets its own banner)
 bannertool makebanner -i res/template-banner.png -a "$GP/res/silent.wav" -o "$TMP/default.bnr" >/dev/null
 bannertool makesmdh -s "gpSP 3D game" -l "gpSP 3D game" -p "gpSP 3D" \
+  -f visible,allow3d,recordusage,extendedbanner \
   -i "$GP/res/icon.png" -o "$TMP/icon.icn" >/dev/null
 # unique ID 0xF3D00 = title ID 000400000F3D0000, which Icon Maker replaces;
 # unencrypted and uncompressed so it can be patched on the 3DS
@@ -51,6 +52,7 @@ make
 # the 3D banner (made by tools/make-app-banners.sh)
 cp res/banner3d-app.bnr "$TMP/app.bnr"
 bannertool makesmdh -s "Icon Maker" -l "Icon Maker: GBA + SNES" -p "bheppe" \
+  -f visible,allow3d,recordusage,extendedbanner \
   -i res/icon.png -o "$TMP/app.icn" >/dev/null
 makerom -f cia -o out/iconmaker.cia -rsf "$GP/res/app.rsf" -exefslogo -elf iconmaker.elf \
   -icon "$TMP/app.icn" -banner "$TMP/app.bnr" \

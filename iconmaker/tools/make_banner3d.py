@@ -18,7 +18,7 @@ gltflib and Pillow. The camera matches pycgfx's banner-camera.gltf: at
 (0, 1, 44.786) with a 30 degree vertical field of view, so the plane z = 0
 shows x -20..20, y -11..13.
 """
-import base64, io, json, math, os, random, struct, subprocess, sys, tempfile, wave
+import base64, io, json, math, os, random, struct, sys, tempfile, wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "..", "res")
@@ -92,7 +92,7 @@ class Builder:
         return {"attributes": a, "indices": i, "material": material}
 
 
-def make_gltf():
+def make_gltf(animated=True):
     b = Builder()
     # the backdrop: 48 x 24 at z = 0, a little wider than the view (40 x 24)
     back = b.prim([([(-24, -11, 0), (24, -11, 0), (24, 13, 0), (-24, 13, 0)], (0, 0, 1),
@@ -139,7 +139,7 @@ def make_gltf():
         "samplers": [{"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071}],
         "images": [{"name": nm, "mimeType": "image/png",
                     "uri": "data:image/png;base64," + base64.b64encode(png).decode()} for nm, png in images],
-        "animations": [{"name": "Sway", "samplers": [
+        "animations": [] if not animated else [{"name": "Sway", "samplers": [
             {"input": t_acc, "output": r_acc, "interpolation": "LINEAR"},
             {"input": t_acc, "output": p_acc, "interpolation": "LINEAR"}],
             "channels": [{"sampler": 0, "target": {"node": 1, "path": "rotation"}},
@@ -180,6 +180,56 @@ def make_jingle(path):
         w.writeframes(b"".join(struct.pack("<h", int(max(-1, min(1, v)) * 32767)) for v in out))
 
 
+def hardware_fixes(cgfx):
+    """What pycgfx leaves out and the real HOME Menu needs (from the
+    hardware-tested banner converters of ClouDS Music FA and ftb): every
+    mesh bound to its node's bone, no skinning, and matte materials
+    (pycgfx's specular washes the model out under the HOME Menu's light)."""
+    from cgfx.mtob import ColorFloat, FragmentLightingFlags
+    from cgfx.primitives import VertexAttributeUsage
+    model = cgfx.data.models["COMMON"]
+    bones = list(model.skeleton.bones)
+    for mesh in model.meshes.data.contents:
+        owners = [b for b in bones if mesh.name == b or mesh.name.startswith(b + "_")]
+        if not owners:
+            sys.exit("no bone for mesh " + mesh.name)
+        mesh.mesh_node_name = max(owners, key=len)
+    for shape in model.shapes.data.contents:
+        for ps in shape.primitive_sets.data.contents:
+            if ps.skinning_mode != 0:
+                sys.exit(shape.name + " is skinned")
+        for attr in shape.vertex_attributes.data.contents:
+            for st in (attr.vertex_streams.data.contents if hasattr(attr, "vertex_streams") else (attr,)):
+                if st.usage in (VertexAttributeUsage.BoneIndex, VertexAttributeUsage.BoneWeight):
+                    sys.exit(shape.name + " has bone weights")
+    for name in model.materials:
+        m = model.materials[name]
+        m.material_color.constant[0] = ColorFloat(0, 0, 0, 1)
+        spec = m.fragment_shader.texture_combiners[2]
+        spec.src_rgb = 0xFFF
+        spec.combine_rgb = 0
+        m.fragment_shader.fragment_lighting.flags = FragmentLightingFlags(0)
+        m.fragment_shader.fragment_lighting_table.distribution_0_sampler = None
+
+
+def convert(pycgfx_dir, gltf, out):
+    sys.path.insert(0, pycgfx_dir)
+    import gltflib
+    import main as pycgfx
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "banner3d.gltf")
+        with open(src, "w") as f:
+            json.dump(gltf, f)
+        cgfx = pycgfx.convert_gltf(gltflib.GLTF.load(src, load_file_resources=True))
+    hardware_fixes(cgfx)
+    data = pycgfx.write(cgfx)
+    if len(data) > 0x80000:
+        sys.exit("model too big for the HOME Menu")
+    with open(out, "wb") as f:
+        f.write(data)
+    print("wrote", os.path.relpath(out, os.path.join(RES, "..")), len(data), "bytes")
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -187,17 +237,10 @@ def main():
     print("wrote res/jingle.wav")
     if sys.argv[1] == "--jingle":
         return
-    pycgfx = os.path.abspath(sys.argv[1])
-    with tempfile.TemporaryDirectory() as tmp:
-        src = os.path.join(tmp, "banner3d.gltf")
-        with open(src, "w") as f:
-            json.dump(make_gltf(), f)
-        subprocess.run([sys.executable, os.path.join(pycgfx, "main.py"), src], check=True, cwd=pycgfx)
-        with open(os.path.join(tmp, "banner3d.cgfx"), "rb") as f:
-            data = f.read()
-    with open(os.path.join(RES, "banner3d.cgfx"), "wb") as f:
-        f.write(data)
-    print("wrote res/banner3d.cgfx,", len(data), "bytes")
+    pycgfx_dir = os.path.abspath(sys.argv[1])
+    convert(pycgfx_dir, make_gltf(True), os.path.join(RES, "banner3d.cgfx"))
+    # the same without the sway, in case an animated banner gives trouble
+    convert(pycgfx_dir, make_gltf(False), os.path.join(RES, "banner3d-still.cgfx"))
 
 
 if __name__ == "__main__":

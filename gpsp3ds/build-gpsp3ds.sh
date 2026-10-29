@@ -42,6 +42,7 @@ mkdir -p build
 # the 3D banner (made by ../iconmaker/tools/make-app-banners.sh)
 cp res/banner3d.bnr build/gpsp3d.bnr
 bannertool makesmdh -s "gpSP 3D" -l "gpSP 3D - standalone GBA for 3DS" -p "gpSP team, bheppe" \
+  -f visible,allow3d,recordusage,extendedbanner \
   -i res/icon.png -o build/gpsp3d.icn
 makerom -f cia -o gpsp3d.cia -rsf res/app.rsf -exefslogo -elf gpsp3d.elf \
   -icon build/gpsp3d.icn -banner build/gpsp3d.bnr \
