@@ -779,9 +779,13 @@ static void draw_bottom(int tab, int sel, int top)
    if (tab == TAB_GAMES)
    {
       char info[64];
-      ui_text(&ui_font_small, 10, LIST_Y - 18, cwd + 5, C_FAINT, UI_W - 90);
-      snprintf(info, sizeof(info), "%d game%s", ngames, ngames == 1 ? "" : "s");
-      ui_text_right(&ui_font_small, UI_W - 10, LIST_Y - 18, info, C_FAINT);
+      static const char *const style_short[STYLE_COUNT] = { "blue", "no background", "3D" };
+      int iw;
+      snprintf(info, sizeof(info), "%d game%s   SELECT: banner %s", ngames, ngames == 1 ? "" : "s",
+               style_short[banner_style]);
+      iw = ui_text_w(&ui_font_small, info);
+      ui_text(&ui_font_small, 10, LIST_Y - 18, cwd + 5, C_FAINT, UI_W - 30 - iw);
+      ui_text_right(&ui_font_small, UI_W - 10, LIST_Y - 18, info, C_DIM);
       if (!nentries)
          ui_text_center(&ui_font_body, UI_W / 2, 130, "No folders or GBA / SNES games here", C_DIM);
       for (i = 0; i < ROWS && top + i < nentries; i++)
@@ -1261,6 +1265,7 @@ int main(void)
             banner_style = (banner_style + 1) % STYLE_COUNT;
             save_settings();
             top_wait = 1;
+            redraw = true;
          }
          else if (k & KEY_Y && am)
          {

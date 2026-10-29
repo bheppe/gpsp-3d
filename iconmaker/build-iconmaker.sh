@@ -53,7 +53,7 @@ bannertool makesmdh -s "Icon Maker" -l "Icon Maker: GBA + SNES" -p "bheppe" \
   -i res/icon.png -o "$TMP/app.icn" >/dev/null
 makerom -f cia -o out/iconmaker.cia -rsf "$GP/res/app.rsf" -exefslogo -elf iconmaker.elf \
   -icon "$TMP/app.icn" -banner "$TMP/app.bnr" \
-  -DAPP_TITLE="Icon Maker" -DAPP_PRODUCT_CODE="CTR-GP3I" -DAPP_UNIQUE_ID=0xF3D01 \
+  -DAPP_TITLE="Icon Maker" -DAPP_PRODUCT_CODE="CTR-GP3I" -DAPP_UNIQUE_ID=0xF3D01 -major 0 -minor 1 -micro 4 \
   -DAPP_SYSTEM_MODE=64MB -DAPP_SYSTEM_MODE_EXT=Legacy -DAPP_ENCRYPTED=false
 cp iconmaker.3dsx out/
 echo "Done: out/iconmaker.cia, out/iconmaker.3dsx (and out/template-gpsp3d.cia to check)"
