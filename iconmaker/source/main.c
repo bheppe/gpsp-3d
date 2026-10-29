@@ -51,7 +51,7 @@
  * (SELECT on the Games tab switches; saved in iconmaker.cfg) */
 enum { STYLE_BLUE, STYLE_CLEAR, STYLE_3D, STYLE_COUNT };
 static const char *style_key[STYLE_COUNT] = { "blue", "none", "3d" };
-static int banner_style;
+static int banner_style = STYLE_3D;
 
 typedef struct { char name[256]; bool dir, has_icon; int sys; } entry;
 typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; int sys; } icon_entry;
@@ -406,12 +406,12 @@ static int rgba_text(u8 *img, int w, int h, const ui_font *f, int x, int y, cons
 
 /* the game's name on the generated banner, right of the icon: up to three
  * lines of Inter, then the emulator's name */
-static void banner_name(const char *title, int sys, u8 *banner)
+static void banner_name(const char *title, int sys, u8 *banner, int maxw)
 {
    const ui_font *f = &ui_font_bold;
    char clean[128], lines[3][64];
    const char *s;
-   int nl = 0, i, maxw = 256 - 120 - 8, y;
+   int nl = 0, i, y;
 
    clean_name(title, clean, sizeof(clean));
    memset(lines, 0, sizeof(lines));
@@ -508,7 +508,7 @@ static void make_art(const char *path, int sys, game_art *a)
    {
       default_banner(a->title, icon_png ? icon_png : a->icon48, iw, ih, a->banner,
                      banner_style == STYLE_CLEAR ? BANNER_CLEAR : 0);
-      banner_name(a->title, sys, a->banner);
+      banner_name(a->title, sys, a->banner, 256 - 120 - 8);
    }
    if (banner_style == STYLE_3D)
    {
@@ -517,7 +517,7 @@ static void make_art(const char *path, int sys, game_art *a)
       else
       {
          default_banner(a->title, NULL, 0, 0, a->back, BANNER_NO_ICON);
-         banner_name(a->title, sys, a->back);
+         banner_name(a->title, sys, a->back, 232 - 120);   /* the 3D view shows x 21..235 */
       }
       image_fit(icon_png ? icon_png : a->icon48, iw, ih, a->label, 128, 128);
       {

@@ -39,7 +39,8 @@ make -f gpsp3d.mk CORE="$CORE" -j$JOBS
 
 echo "=== 3/3 CIA ==="
 mkdir -p build
-bannertool makebanner -i res/banner.png -a res/silent.wav -o build/gpsp3d.bnr
+# the 3D banner (made by ../iconmaker/tools/make-app-banners.sh)
+cp res/banner3d.bnr build/gpsp3d.bnr
 bannertool makesmdh -s "gpSP 3D" -l "gpSP 3D - standalone GBA for 3DS" -p "gpSP team, bheppe" \
   -i res/icon.png -o build/gpsp3d.icn
 makerom -f cia -o gpsp3d.cia -rsf res/app.rsf -exefslogo -elf gpsp3d.elf \
