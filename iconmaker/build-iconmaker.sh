@@ -18,7 +18,7 @@ done
 TMP="$HERE/build-template"
 rm -rf "$TMP"; mkdir -p "$TMP/romfs" data out
 
-echo "=== 1/2 template forwarder ==="
+echo "=== 1/2 template forwarders ==="
 make -C "$GP/forwarder" >/dev/null
 # the forwarder ignores romfs:/path.txt once Icon Maker fills in its slot
 printf '\n' > "$TMP/romfs/path.txt"
@@ -36,6 +36,15 @@ makerom -f cia -o data/fwd_gpsp3d.bin -rsf "$GP/forwarder/forwarder.rsf" -exefsl
   -DAPP_ROMFS="$TMP/romfs"
 cp data/fwd_gpsp3d.bin out/template-gpsp3d.cia
 ls -l data/fwd_gpsp3d.bin
+
+# the same with the 3D banner (made by tools/make_banner3d.py) and its jingle
+bannertool makebanner -ci res/banner3d.cgfx -a res/jingle.wav -o "$TMP/banner3d.bnr" >/dev/null
+makerom -f cia -o data/fwd_gpsp3d_3d.bin -rsf "$GP/forwarder/forwarder.rsf" -exefslogo \
+  -elf "$GP/forwarder/forwarder.elf" -icon "$TMP/icon.icn" -banner "$TMP/banner3d.bnr" \
+  -DAPP_TITLE="gp3dfwd" -DAPP_PRODUCT_CODE="CTR-GP3F" -DAPP_UNIQUE_ID=0xF3D00 \
+  -DAPP_SYSTEM_MODE=64MB -DAPP_SYSTEM_MODE_EXT=Legacy -DAPP_ENCRYPTED=false \
+  -DAPP_ROMFS="$TMP/romfs"
+ls -l data/fwd_gpsp3d_3d.bin
 
 echo "=== 2/2 Icon Maker ==="
 make

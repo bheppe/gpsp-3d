@@ -7,7 +7,12 @@
  * picture is compressed again and must fit in the room the old one had,
  * before the sound: the template's banner is made from a noise picture, which
  * hardly compresses, so there's always room. Formats from 3dbrew.org (CBMD,
- * CGFX, LZ11). */
+ * CGFX, LZ11).
+ *
+ * The 3D template (tools/make_banner3d.py, through pycgfx) has two RGBA4
+ * textures: the 256x128 backdrop and a 128x128 label on the tile that comes
+ * out of the screen. pycgfx stores rows bottom first, so those are written
+ * flipped. */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -193,14 +198,14 @@ static int zorder(int x, int y)
 }
 
 /* RGBA8 to RGBA4444, with a little ordered dither so gradients don't band */
-static void encode_rgba4(const uint8_t *rgba, int w, int h, uint8_t *tex)
+static void encode_rgba4(const uint8_t *rgba, int w, int h, uint8_t *tex, int flip)
 {
    static const uint8_t bayer[4][4] = { {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5} };
    int x, y, k;
    for (y = 0; y < h; y++)
       for (x = 0; x < w; x++)
       {
-         const uint8_t *p = rgba + (y * w + x) * 4;
+         const uint8_t *p = rgba + ((flip ? h - 1 - y : y) * w + x) * 4;
          int t = ((y / 8) * (w / 8) + x / 8) * 64 + zorder(x & 7, y & 7);
          int d = bayer[y & 3][x & 3];
          uint16_t v = 0;
@@ -222,10 +227,38 @@ static int fail(char *err, int errlen, const char *msg)
    return -1;
 }
 
+/* the offset of the RGBA4 texture object of w x h in the model, or 0 */
+static uint32_t find_txob(const uint8_t *cgfx, uint32_t glen, uint32_t w, uint32_t h)
+{
+   uint32_t i;
+   for (i = 0; i + 0x48 <= glen; i += 4)
+      if (!memcmp(cgfx + i, "TXOB", 4) && rd32(cgfx + i + 0x14) == h &&
+          rd32(cgfx + i + 0x18) == w && rd32(cgfx + i + 0x30) == 4 &&
+          rd32(cgfx + i + 0x40) == w * h * 2)
+         return i;
+   return 0;
+}
+
+static int put_texture(uint8_t *cgfx, uint32_t glen, uint32_t txob, int w, int h,
+                       const uint8_t *rgba, int flip)
+{
+   uint32_t n = txob + 0x44 + rd32(cgfx + txob + 0x44);  /* data offset is relative */
+   if (n < txob || n > glen || (uint32_t)(w * h * 2) > glen - n)
+      return -1;
+   encode_rgba4(rgba, w, h, cgfx + n, flip);
+   return 0;
+}
+
 int banner_set_image(uint8_t *cbmd, uint32_t size, const uint8_t *rgba256x128,
                      char *err, int errlen)
 {
-   uint32_t cgfx_off, cwav_off, room, glen, i, n, txob = 0;
+   return banner_set_images(cbmd, size, rgba256x128, NULL, err, errlen);
+}
+
+int banner_set_images(uint8_t *cbmd, uint32_t size, const uint8_t *rgba256x128,
+                      const uint8_t *label128, char *err, int errlen)
+{
+   uint32_t cgfx_off, cwav_off, room, glen, i, n, txob, label;
    uint8_t *cgfx, *packed;
    int ret = -1;
 
@@ -240,7 +273,7 @@ int banner_set_image(uint8_t *cbmd, uint32_t size, const uint8_t *rgba256x128,
          return fail(err, errlen, "has region models");
    room = cwav_off - cgfx_off;
    glen = rd32(cbmd + cgfx_off) >> 8;
-   if (cbmd[cgfx_off] != 0x11 || glen < 0x100 || glen > 0x40000)
+   if (cbmd[cgfx_off] != 0x11 || glen < 0x100 || glen > 0x80000)
       return fail(err, errlen, "model not LZ11");
 
    cgfx = malloc(glen);
@@ -256,27 +289,19 @@ int banner_set_image(uint8_t *cbmd, uint32_t size, const uint8_t *rgba256x128,
       goto out;
    }
 
-   /* the 256x128 RGBA4 texture object */
-   for (i = 0; i + 0x48 <= glen; i += 4)
-      if (!memcmp(cgfx + i, "TXOB", 4) && rd32(cgfx + i + 0x14) == 128 &&
-          rd32(cgfx + i + 0x18) == 256 && rd32(cgfx + i + 0x30) == 4 &&
-          rd32(cgfx + i + 0x40) == 256 * 128 * 2)
-      {
-         txob = i;
-         break;
-      }
+   txob = find_txob(cgfx, glen, 256, 128);
+   label = find_txob(cgfx, glen, 128, 128);    /* only in the 3D template */
    if (!txob)
    {
       fail(err, errlen, "no 256x128 texture");
       goto out;
    }
-   n = txob + 0x44 + rd32(cgfx + txob + 0x44);  /* data offset is relative */
-   if (n < txob || n > glen || 256 * 128 * 2 > glen - n)
+   if (put_texture(cgfx, glen, txob, 256, 128, rgba256x128, label != 0) ||
+       (label && label128 && put_texture(cgfx, glen, label, 128, 128, label128, 1)))
    {
       fail(err, errlen, "bad texture offset");
       goto out;
    }
-   encode_rgba4(rgba256x128, 256, 128, cgfx + n);
 
    n = lz11_compress(cgfx, glen, packed, room);
    if (!n)

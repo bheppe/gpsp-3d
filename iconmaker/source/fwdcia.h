@@ -31,6 +31,7 @@ typedef struct
    const char *path;       /* the game, e.g. "sdmc:/roms/gba/Golf.gba" */
    const uint8_t *smdh;    /* FWDCIA_SMDH_SIZE bytes, or NULL to keep the template's */
    const uint8_t *banner;  /* 256x128 RGBA top-screen picture, or NULL to keep the template's */
+   const uint8_t *label;   /* 3D template only: 128x128 RGBA on the tile, or NULL */
 } fwdcia_params;
 
 /* Returns 0, or -1 with a message in err. */

@@ -13,8 +13,9 @@ void default_icon_style(const char *name, int style, uint8_t *rgba48);
 /* A 256x128 RGBA banner for a game with no banner PNG: its icon (iw x ih
  * RGBA, shown 96x96 at (12, 16)) on gpSP 3D's navy background, or with
  * BANNER_CLEAR on nothing (the HOME Menu's background shows). BANNER_TEXT
- * adds its name in a pixel font (the app writes the name itself, in Inter). */
-enum { BANNER_TEXT = 1, BANNER_CLEAR = 2 };
+ * adds its name in a pixel font (the app writes the name itself, in Inter),
+ * BANNER_NO_ICON leaves the icon out (and the name: only the background). */
+enum { BANNER_TEXT = 1, BANNER_CLEAR = 2, BANNER_NO_ICON = 4 };
 void default_banner(const char *name, const uint8_t *icon, int iw, int ih,
                     uint8_t *rgba256x128, int flags);
 

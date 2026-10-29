@@ -34,8 +34,10 @@
 #define STBI_NO_STDIO_WRITE
 #include "stb_image.h"
 
-/* the template forwarder CIA (data/fwd_gpsp3d.bin, built by build-iconmaker.sh) */
+/* the template forwarder CIAs (data/, built by build-iconmaker.sh): with a
+ * flat banner, and with the 3D one (and its jingle) */
 #include "fwd_gpsp3d_bin.h"
+#include "fwd_gpsp3d_3d_bin.h"
 
 #define ICONMAKER_VERSION "0.1.4"
 #define MAX_ENTRIES 1024
@@ -43,9 +45,13 @@
 #define LAST_DIR    "sdmc:/3ds/gpsp3d/iconmaker_dir.txt"
 #define SETTINGS    "sdmc:/3ds/gpsp3d/iconmaker.cfg"
 
-/* Banner background for games with no banner PNG: gpSP 3D's blue, or none
- * (the HOME Menu's own background shows behind the icon and the name) */
-static int banner_clear;
+/* The banner a game gets: on gpSP 3D's blue, on nothing (the HOME Menu's
+ * own background shows behind the icon and the name), or 3D: the icon on a
+ * tile that comes out of the screen and sways, over the blue, with a jingle
+ * (SELECT on the Games tab switches; saved in iconmaker.cfg) */
+enum { STYLE_BLUE, STYLE_CLEAR, STYLE_3D, STYLE_COUNT };
+static const char *style_key[STYLE_COUNT] = { "blue", "none", "3d" };
+static int banner_style;
 
 typedef struct { char name[256]; bool dir, has_icon; int sys; } entry;
 typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; int sys; } icon_entry;
@@ -469,7 +475,9 @@ static void banner_name(const char *title, int sys, u8 *banner)
 typedef struct
 {
    u8 icon48[48 * 48 * 4];
-   u8 banner[256 * 128 * 4];
+   u8 banner[256 * 128 * 4];     /* what the top screen previews (flat) */
+   u8 back[256 * 128 * 4];       /* 3D: the backdrop, without the icon */
+   u8 label[128 * 128 * 4];      /* 3D: the icon, on the tile */
    char title[64];
    int sys;
    bool has_icon_png, has_banner_png;
@@ -499,8 +507,31 @@ static void make_art(const char *path, int sys, game_art *a)
    else                                /* the icon, bigger, and the name */
    {
       default_banner(a->title, icon_png ? icon_png : a->icon48, iw, ih, a->banner,
-                     banner_clear ? BANNER_CLEAR : 0);
+                     banner_style == STYLE_CLEAR ? BANNER_CLEAR : 0);
       banner_name(a->title, sys, a->banner);
+   }
+   if (banner_style == STYLE_3D)
+   {
+      if (banner_png)
+         banner_from_image(banner_png, bw, bh, a->back);
+      else
+      {
+         default_banner(a->title, NULL, 0, 0, a->back, BANNER_NO_ICON);
+         banner_name(a->title, sys, a->back);
+      }
+      image_fit(icon_png ? icon_png : a->icon48, iw, ih, a->label, 128, 128);
+      {
+         /* see-through parts take the tile's grey (make_banner3d.py's Body) */
+         int i, k;
+         static const u8 body[3] = { 0x4A, 0x4F, 0x5A };
+         for (i = 0; i < 128 * 128; i++)
+         {
+            u8 *q = a->label + i * 4;
+            for (k = 0; k < 3; k++)
+               q[k] = (u8)((q[k] * q[3] + body[k] * (255 - q[3])) / 255);
+            q[3] = 255;
+         }
+      }
    }
    if (icon_png)
       stbi_image_free(icon_png);
@@ -517,7 +548,9 @@ static int make_icon(const char *path, int sys, char *err, int errlen)
    char longt[160];
    const u8 *tsmdh;
    u8 *cia;
-   u32 size = fwd_gpsp3d_bin_size, written;
+   bool three_d = banner_style == STYLE_3D;
+   const u8 *tpl = three_d ? fwd_gpsp3d_3d_bin : fwd_gpsp3d_bin;
+   u32 size = three_d ? fwd_gpsp3d_3d_bin_size : fwd_gpsp3d_bin_size, written;
    fwdcia_params p;
    Handle h;
    Result r;
@@ -531,7 +564,7 @@ static int make_icon(const char *path, int sys, char *err, int errlen)
       snprintf(err, errlen, "Not enough memory.");
       return -1;
    }
-   memcpy(cia, fwd_gpsp3d_bin, size);
+   memcpy(cia, tpl, size);
    tsmdh = template_smdh(cia, size);
    if (!tsmdh)
    {
@@ -548,7 +581,8 @@ static int make_icon(const char *path, int sys, char *err, int errlen)
    p.launch = systems[sys].launch;
    p.path = path;
    p.smdh = smdh;
-   p.banner = art.banner;
+   p.banner = three_d ? art.back : art.banner;
+   p.label = three_d ? art.label : NULL;
    if (fwdcia_make(cia, size, &p, sha256_3ds, err, errlen))
    {
       free(cia);
@@ -834,7 +868,9 @@ static void draw_top_game(const game_art *a, bool installed)
    ui_text(&ui_font_bold, 96, 164, a->title, C_TEXT, UI_W - 110);
    ui_text(&ui_font_small, 96, 186, a->has_icon_png ? "Icon: its PNG" : "Icon: made from the name", C_DIM, 0);
    ui_text(&ui_font_small, 96, 201, a->has_banner_png ? "Banner: its .banner.png"
-           : banner_clear ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)", C_DIM, 0);
+           : banner_style == STYLE_3D ? "Banner: 3D, the icon pops out (SELECT)"
+           : banner_style == STYLE_CLEAR ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)",
+           C_DIM, 0);
    {
       char opens[80];
       if (sys_installed[a->sys])
@@ -1078,7 +1114,7 @@ static void save_settings(void)
    mkdir("sdmc:/3ds/gpsp3d", 0777);
    if ((f = fopen(SETTINGS, "w")))
    {
-      fprintf(f, "banner_background=%s\n", banner_clear ? "none" : "blue");
+      fprintf(f, "banner_style=%s\n", style_key[banner_style]);
       fclose(f);
    }
 }
@@ -1090,8 +1126,14 @@ static void load_settings(void)
    if (!f)
       return;
    while (fgets(buf, sizeof(buf), f))
-      if (!strncmp(buf, "banner_background=", 18))
-         banner_clear = !strncmp(buf + 18, "none", 4);
+      if (!strncmp(buf, "banner_style=", 13))
+      {
+         int i;
+         buf[strcspn(buf, "\r\n")] = 0;
+         for (i = 0; i < STYLE_COUNT; i++)
+            if (!strcmp(buf + 13, style_key[i]))
+               banner_style = i;
+      }
    fclose(f);
 }
 
@@ -1215,8 +1257,8 @@ int main(void)
          }
          else if (k & KEY_SELECT)
          {
-            /* banner background: blue <-> none, for icons made from now on */
-            banner_clear = !banner_clear;
+            /* the banner style, for icons made from now on */
+            banner_style = (banner_style + 1) % STYLE_COUNT;
             save_settings();
             top_wait = 1;
          }

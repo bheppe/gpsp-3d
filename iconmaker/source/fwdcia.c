@@ -207,7 +207,7 @@ int fwdcia_make(uint8_t *cia, uint32_t size, const fwdcia_params *p,
       len = rd32le(exefs + bnr * 16 + 12);
       if (!in(off, len, exefs_size))
          return fail(err, errlen, "bad banner entry");
-      if (banner_set_image(exefs + off, len, p->banner, err, errlen))
+      if (banner_set_images(exefs + off, len, p->banner, p->label, err, errlen))
          return -1;
       sha256(exefs + off, len, exefs + 0x200 - (bnr + 1) * 0x20);
    }

@@ -327,6 +327,9 @@ void default_banner(const char *name, const uint8_t *icon, int iw, int ih,
    else
       background(&c);
 
+   if (flags & BANNER_NO_ICON)          /* the 3D banner's backdrop: the icon is on the tile */
+      return;
+
    /* the icon, 96x96, over a soft shadow */
    image_fit(icon, iw, ih, big, 96, 96);
    for (y = 0; y < 96; y++)
