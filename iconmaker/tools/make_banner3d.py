@@ -354,8 +354,7 @@ def make_app_banners():
     gp = os.path.join(root, "gpsp3ds", "res")
     app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(gp, "banner3d-name.png"),
                os.path.join(gp, "banner3d-label.png"), jingle, os.path.join(gp, "banner3d.bnr"))
-    # Icon Maker: the still model for now, to tell an animation problem apart
-    app_banner(os.path.join(RES, "banner3d-still.cgfx"), os.path.join(RES, "banner3d-name.png"),
+    app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(RES, "banner3d-name.png"),
                os.path.join(RES, "banner3d-label.png"), jingle, os.path.join(RES, "banner3d-app.bnr"))
     snes = os.path.join(root, "..", "snes9x_3ds-pr2", "resources")
     if os.path.isfile(os.path.join(snes, "banner3d-name.png")):
