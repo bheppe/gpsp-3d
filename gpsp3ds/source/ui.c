@@ -158,19 +158,54 @@ void ui_arrow(int cx, int cy, int s, int dir, uint16_t c)
    }
 }
 
-static const ui_glyph *glyph(const ui_font *f, char ch)
+/* Next character of a UTF-8 string; a byte that isn't valid UTF-8 is taken
+ * as Latin-1, so old file names still show. */
+unsigned ui_utf8_next(const char **ps)
 {
-   unsigned char u = (unsigned char)ch;
-   if (u < 32 || u > 126)
-      u = '?';
-   return &f->g[u - 32];
+   const unsigned char *s = (const unsigned char *)*ps;
+   unsigned c = s[0];
+   if (c >= 0xC2 && c <= 0xDF && (s[1] & 0xC0) == 0x80)
+   {
+      *ps += 2;
+      return ((c & 0x1F) << 6) | (s[1] & 0x3F);
+   }
+   if (c >= 0xE0 && c <= 0xEF && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80)
+   {
+      *ps += 3;
+      return ((c & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+   }
+   if (c >= 0xF0 && c <= 0xF4 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80 && (s[3] & 0xC0) == 0x80)
+   {
+      *ps += 4;
+      return 0xFFFD;
+   }
+   *ps += 1;
+   return c;
+}
+
+const ui_glyph *ui_glyph_of(const ui_font *f, unsigned c)
+{
+   switch (c)
+   {
+      case 0x2018: case 0x2019: c = '\''; break;
+      case 0x201C: case 0x201D: c = '"'; break;
+      case 0x2013: case 0x2014: c = '-'; break;
+      case 0x2026: c = '.'; break;
+      case 0x2122: c = 'T'; break;
+      case 0xA0:   c = ' '; break;
+   }
+   if (c >= 32 && c <= 126)
+      return &f->g[c - 32];
+   if (c >= 160 && c <= 255)
+      return &f->g[95 + c - 160];
+   return &f->g['?' - 32];
 }
 
 int ui_text_w(const ui_font *f, const char *s)
 {
    int w = 0;
-   for (; *s; s++)
-      w += glyph(f, *s)->adv;
+   while (*s)
+      w += ui_glyph_of(f, ui_utf8_next(&s))->adv;
    return w;
 }
 
@@ -192,15 +227,15 @@ int ui_text(const ui_font *f, int x, int y, const char *s, uint16_t c, int max_w
    int dots = 0, x0 = x;
    if (max_w > 0 && ui_text_w(f, s) > max_w)
       dots = ui_text_w(f, "...");
-   for (; *s; s++)
+   while (*s)
    {
-      const ui_glyph *g = glyph(f, *s);
+      const ui_glyph *g = ui_glyph_of(f, ui_utf8_next(&s));
       if (dots && x + g->adv - x0 > max_w - dots)
       {
          const char *d = "...";
          for (; *d; d++)
          {
-            const ui_glyph *gd = glyph(f, *d);
+            const ui_glyph *gd = &f->g[*d - 32];
             draw_glyph(f, gd, x, y, c);
             x += gd->adv;
          }

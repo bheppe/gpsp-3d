@@ -96,6 +96,38 @@ void clean_name(const char *in, char *out, int n)
    out[k] = 0;
 }
 
+/* the pixel font has only A-Z, 0-9 and a little punctuation: accented
+ * letters (UTF-8, or Latin-1 bytes) become the plain letter, in place */
+static void fold_ascii(char *s)
+{
+   static const char latin[] =
+      "AAAAAAACEEEEIIII" "DNOOOOOxOUUUUYTs" "aaaaaaaceeeeiiii" "dnooooo/ouuuuyty";
+   const unsigned char *r = (const unsigned char *)s;
+   char *w = s;
+   while (*r)
+   {
+      unsigned c = *r++;
+      if (c >= 0xC2 && c <= 0xDF && (*r & 0xC0) == 0x80)
+         c = ((c & 0x1F) << 6) | (*r++ & 0x3F);
+      else if (c >= 0xE0 && c <= 0xEF && (r[0] & 0xC0) == 0x80 && (r[1] & 0xC0) == 0x80)
+      {
+         c = ((c & 0x0F) << 12) | ((r[0] & 0x3F) << 6) | (r[1] & 0x3F);
+         r += 2;
+      }
+      if (c < 128)
+         *w++ = (char)c;
+      else if (c >= 0xC0 && c <= 0xFF)
+         *w++ = latin[c - 0xC0];
+      else if (c == 0x2018 || c == 0x2019)
+         *w++ = '\'';
+      else if (c == 0x2013 || c == 0x2014)
+         *w++ = '-';
+      else if (c == 0xA0)
+         *w++ = ' ';
+   }
+   *w = 0;
+}
+
 /* Word wrap a name into at most rows lines of cols characters; " - "
  * between parts is left out. Returns the number of lines. */
 static int wrap(const char *s, char lines[][33], int rows, int cols)
@@ -186,6 +218,7 @@ void default_icon_style(const char *name, int style, uint8_t *rgba48)
 
    memset(rgba48, 0, 48 * 48 * 4);
    clean_name(name, clean, sizeof(clean));
+   fold_ascii(clean);
 
    if (style == ICON_SNES)
    {
@@ -237,17 +270,26 @@ void default_icon(const char *name, uint8_t *rgba48)
    default_icon_style(name, ICON_GBA, rgba48);
 }
 
+/* one RGBA pixel over another, alpha included */
+static void blend(uint8_t *d, const uint8_t *rgb, int a)
+{
+   int k, da = d[3] * (255 - a) / 255, oa = a + da;
+   if (!oa)
+      return;
+   for (k = 0; k < 3; k++)
+      d[k] = (uint8_t)((rgb[k] * a + d[k] * da) / oa);
+   d[3] = (uint8_t)oa;
+}
+
 /* src (sw x sh RGBA) over dst (dw wide) at (x0, y0), by src's alpha */
 static void over(uint8_t *dst, int dw, int x0, int y0, const uint8_t *src, int sw, int sh)
 {
-   int x, y, k;
+   int x, y;
    for (y = 0; y < sh; y++)
       for (x = 0; x < sw; x++)
       {
          const uint8_t *s = src + (y * sw + x) * 4;
-         uint8_t *d = dst + ((y0 + y) * dw + x0 + x) * 4;
-         for (k = 0; k < 3; k++)
-            d[k] = (s[k] * s[3] + d[k] * (255 - s[3])) / 255;
+         blend(dst + ((y0 + y) * dw + x0 + x) * 4, s, s[3]);
       }
 }
 
@@ -272,32 +314,32 @@ void banner_from_image(const uint8_t *img, int w, int h, uint8_t *rgba256x128)
 }
 
 void default_banner(const char *name, const uint8_t *icon, int iw, int ih,
-                    uint8_t *rgba256x128, int with_text)
+                    uint8_t *rgba256x128, int flags)
 {
    canvas c = { rgba256x128, 256, 128 };
    static uint8_t big[96 * 96 * 4];
    char clean[128], lines[5][33];
-   int x, y, nl, i, k, ty;
+   int x, y, nl, i, ty;
 
-   background(&c);
+   static const uint8_t black[3] = { 0, 0, 0 };
+   if (flags & BANNER_CLEAR)
+      memset(rgba256x128, 0, 256 * 128 * 4);   /* the HOME Menu's own background shows */
+   else
+      background(&c);
 
    /* the icon, 96x96, over a soft shadow */
    image_fit(icon, iw, ih, big, 96, 96);
    for (y = 0; y < 96; y++)
       for (x = 0; x < 96; x++)
-      {
-         uint8_t a = big[(y * 96 + x) * 4 + 3];
-         uint8_t *sh = rgba256x128 + ((19 + y) * 256 + 15 + x) * 4;
-         for (k = 0; k < 3; k++)
-            sh[k] = sh[k] * (255 - a / 3) / 255;
-      }
+         blend(rgba256x128 + ((19 + y) * 256 + 15 + x) * 4, black, big[(y * 96 + x) * 4 + 3] / 3);
    over(rgba256x128, 256, 12, 16, big, 96, 96);
 
-   if (!with_text)
+   if (!(flags & BANNER_TEXT))
       return;
 
    /* the name, and "gpSP 3D" under it */
    clean_name(name, clean, sizeof(clean));
+   fold_ascii(clean);
    nl = wrap(clean, lines, 5, 15);
    if (!nl)
    {

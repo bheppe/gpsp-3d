@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generates source/ui_font.c: anti-aliased 4-bit glyph atlases (ASCII 32..126)
+"""Generates source/ui_font.c: anti-aliased 4-bit glyph atlases (ASCII 32..126,
+then Latin-1 160..255 for accented letters like the e in Pokemon)
 from the Inter typeface (SIL Open Font License 1.1, https://rsms.me/inter/).
 usage: make_font.py <font dir> <out.c>"""
 import sys
@@ -20,7 +21,7 @@ for name, fname, size in FONTS:
     font = ImageFont.truetype(f"{fdir}/{fname}", size)
     ascent, descent = font.getmetrics()
     glyphs, data = [], bytearray()
-    for c in range(32, 127):
+    for c in list(range(32, 127)) + list(range(160, 256)):
         ch = chr(c)
         adv = round(font.getlength(ch))
         bbox = font.getbbox(ch)  # relative to the top of the ascent line
@@ -43,7 +44,7 @@ for name, fname, size in FONTS:
     if not data:
         o.append("  0")
     o.append("};")
-    o.append(f"static const ui_glyph {name}_glyphs[95] = {{")
+    o.append(f"static const ui_glyph {name}_glyphs[191] = {{")
     for g in glyphs:
         o.append("  {%d,%d,%d,%d,%d,%d}," % g)
     o.append("};")

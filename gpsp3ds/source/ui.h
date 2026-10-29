@@ -32,6 +32,10 @@ void ui_arrow(int cx, int cy, int size, int dir /* -1 left, 1 right, 2 up, -2 do
 void ui_set_clip_y(int y0, int y1);
 
 int  ui_text_w(const ui_font *f, const char *s);
+/* UTF-8 text: the next character (moves *s on), and its glyph (Latin-1 and
+ * a few look-alikes, else '?') */
+unsigned ui_utf8_next(const char **s);
+const ui_glyph *ui_glyph_of(const ui_font *f, unsigned c);
 /* draws s with its top-left at (x, y); clips to max_w pixels with "..." if
  * max_w > 0. Returns the x after the text. */
 int  ui_text(const ui_font *f, int x, int y, const char *s, uint16_t c, int max_w);

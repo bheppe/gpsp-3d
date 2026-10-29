@@ -11,10 +11,12 @@ enum { ICON_GBA, ICON_SNES };
 void default_icon_style(const char *name, int style, uint8_t *rgba48);
 
 /* A 256x128 RGBA banner for a game with no banner PNG: its icon (iw x ih
- * RGBA, shown 96x96 at (12, 16)) and, with_text, its name in a pixel font on
- * gpSP 3D's navy background. (The app writes the name itself, in Inter.) */
+ * RGBA, shown 96x96 at (12, 16)) on gpSP 3D's navy background, or with
+ * BANNER_CLEAR on nothing (the HOME Menu's background shows). BANNER_TEXT
+ * adds its name in a pixel font (the app writes the name itself, in Inter). */
+enum { BANNER_TEXT = 1, BANNER_CLEAR = 2 };
 void default_banner(const char *name, const uint8_t *icon, int iw, int ih,
-                    uint8_t *rgba256x128, int with_text);
+                    uint8_t *rgba256x128, int flags);
 
 /* the name without "(USA)", "[!]" and the like, and with '_' as spaces */
 void clean_name(const char *in, char *out, int n);

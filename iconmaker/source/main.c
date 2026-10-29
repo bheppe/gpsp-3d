@@ -37,10 +37,15 @@
 /* the template forwarder CIA (data/fwd_gpsp3d.bin, built by build-iconmaker.sh) */
 #include "fwd_gpsp3d_bin.h"
 
-#define ICONMAKER_VERSION "0.1.3"
+#define ICONMAKER_VERSION "0.1.4"
 #define MAX_ENTRIES 1024
 #define MAX_ICONS   300
 #define LAST_DIR    "sdmc:/3ds/gpsp3d/iconmaker_dir.txt"
+#define SETTINGS    "sdmc:/3ds/gpsp3d/iconmaker.cfg"
+
+/* Banner background for games with no banner PNG: gpSP 3D's blue, or none
+ * (the HOME Menu's own background shows behind the icon and the name) */
+static int banner_clear;
 
 typedef struct { char name[256]; bool dir, has_icon; int sys; } entry;
 typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; int sys; } icon_entry;
@@ -360,11 +365,10 @@ static int rgba_text(u8 *img, int w, int h, const ui_font *f, int x, int y, cons
    {
       int cx = x + (pass ? 0 : 1), cy = y + (pass ? 0 : 2);
       u32 col = pass ? rgb : 0x0A0A1E;
-      const char *p;
-      for (p = s; *p; p++)
+      const char *p = s;
+      while (*p)
       {
-         unsigned char u = (unsigned char)*p;
-         const ui_glyph *g = &f->g[(u < 32 || u > 126 ? '?' : u) - 32];
+         const ui_glyph *g = ui_glyph_of(f, ui_utf8_next(&p));
          const unsigned char *b = f->bits + g->off;
          int i, j, n = 0;
          for (j = 0; j < g->h; j++)
@@ -376,10 +380,15 @@ static int rgba_text(u8 *img, int w, int h, const ui_font *f, int x, int y, cons
                   continue;
                d = img + (py * w + px) * 4;
                v = v * 17 * (pass ? 255 : 150) / 255;
-               for (k = 0; k < 3; k++)
                {
-                  int c = (col >> (16 - 8 * k)) & 255;
-                  d[k] = (u8)((c * v + d[k] * (255 - v)) / 255);
+                  /* over what's there, alpha too (the banner can be transparent) */
+                  int da = d[3] * (255 - v) / 255, oa = v + da;
+                  for (k = 0; k < 3; k++)
+                  {
+                     int c = (col >> (16 - 8 * k)) & 255;
+                     d[k] = (u8)((c * v + d[k] * da) / oa);
+                  }
+                  d[3] = (u8)oa;
                }
             }
          cx += g->adv;
@@ -489,7 +498,8 @@ static void make_art(const char *path, int sys, game_art *a)
       banner_from_image(banner_png, bw, bh, a->banner);
    else                                /* the icon, bigger, and the name */
    {
-      default_banner(a->title, icon_png ? icon_png : a->icon48, iw, ih, a->banner, 0);
+      default_banner(a->title, icon_png ? icon_png : a->icon48, iw, ih, a->banner,
+                     banner_clear ? BANNER_CLEAR : 0);
       banner_name(a->title, sys, a->banner);
    }
    if (icon_png)
@@ -823,8 +833,8 @@ static void draw_top_game(const game_art *a, bool installed)
    blit_rgba(a->icon48, 48, 48, 32, 168, 1);
    ui_text(&ui_font_bold, 96, 164, a->title, C_TEXT, UI_W - 110);
    ui_text(&ui_font_small, 96, 186, a->has_icon_png ? "Icon: its PNG" : "Icon: made from the name", C_DIM, 0);
-   ui_text(&ui_font_small, 96, 201, a->has_banner_png ? "Banner: its .banner.png" : "Banner: made from the icon",
-           C_DIM, 0);
+   ui_text(&ui_font_small, 96, 201, a->has_banner_png ? "Banner: its .banner.png"
+           : banner_clear ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)", C_DIM, 0);
    {
       char opens[80];
       if (sys_installed[a->sys])
@@ -1061,6 +1071,30 @@ static void save_dir(void)
    }
 }
 
+static void save_settings(void)
+{
+   FILE *f;
+   mkdir("sdmc:/3ds", 0777);
+   mkdir("sdmc:/3ds/gpsp3d", 0777);
+   if ((f = fopen(SETTINGS, "w")))
+   {
+      fprintf(f, "banner_background=%s\n", banner_clear ? "none" : "blue");
+      fclose(f);
+   }
+}
+
+static void load_settings(void)
+{
+   FILE *f = fopen(SETTINGS, "r");
+   char buf[128];
+   if (!f)
+      return;
+   while (fgets(buf, sizeof(buf), f))
+      if (!strncmp(buf, "banner_background=", 18))
+         banner_clear = !strncmp(buf + 18, "none", 4);
+   fclose(f);
+}
+
 static void load_dir(void)
 {
    FILE *f = fopen(LAST_DIR, "r");
@@ -1126,6 +1160,7 @@ int main(void)
 
    if (am)
       read_icons();
+   load_settings();
    load_dir();
    read_dir();
    top_wait = 1;
@@ -1177,6 +1212,13 @@ int main(void)
          {
             enter("..");
             sel = top = 0;
+         }
+         else if (k & KEY_SELECT)
+         {
+            /* banner background: blue <-> none, for icons made from now on */
+            banner_clear = !banner_clear;
+            save_settings();
+            top_wait = 1;
          }
          else if (k & KEY_Y && am)
          {
