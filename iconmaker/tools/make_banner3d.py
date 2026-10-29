@@ -7,7 +7,7 @@ The HOME Menu turns a 3D banner's whole model about the vertical axis. The
 model is a tile with the game's icon on both faces, bobbing a little, and
 under it the game's name on a strip that always faces the camera. Icon Maker
 swaps in two pictures for each game:
-  LABEL  128x128 RGBA4  both faces of the tile: the game's icon
+  LABEL  128x128 RGB565 both faces of the tile: the game's icon
   NAME   256x64  RGBA4  the name strip (transparent around the text)
 Both start as noise, so the compressed model always has room for any picture.
 
@@ -27,9 +27,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "..", "res")
 
 # ---- layout (the HOME Menu shows about y -8..9; it turns the model about x = 0) ----
-TILE_W, TILE_D = 11.0, 1.4                 # the tile: square face, depth
-TILE_Y = 3.0                               # its centre
-NAME_W, NAME_Y = 18.0, -8.0                # the name strip: width, bottom edge (height = width / 4)
+TILE_W, TILE_D = 9.5, 1.4                  # the tile: face, depth
+CORNER, CORNER_SEG = 0.2, 6                # corner radius (of the width), points per corner
+TILE_Y = 3.6                               # its centre
+NAME_W, NAME_Y = 26.0, -7.9                # the name strip: width, bottom edge (height = width / 4)
 BOB = 0.4                                  # how far the tile bobs
 SECONDS = 4.0                              # one bob, looped
 
@@ -48,22 +49,6 @@ def solid_png(w, h, rgb):
     b = io.BytesIO()
     Image.new("RGBA", (w, h), rgb + (255,)).save(b, "PNG")
     return b.getvalue()
-
-
-def box(w, h, d):
-    """A box centred on 0: the front face (+z) gets the whole texture, the
-    other five faces go in a separate primitive."""
-    x, y, z = w / 2, h / 2, d / 2
-    front = ([(-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)], (0, 0, 1),
-             [(0, 1), (1, 1), (1, 0), (0, 0)])
-    others = [
-        ([(x, -y, -z), (-x, -y, -z), (-x, y, -z), (x, y, -z)], (0, 0, -1)),
-        ([(x, -y, z), (x, -y, -z), (x, y, -z), (x, y, z)], (1, 0, 0)),
-        ([(-x, -y, -z), (-x, -y, z), (-x, y, z), (-x, y, -z)], (-1, 0, 0)),
-        ([(-x, y, z), (x, y, z), (x, y, -z), (-x, y, -z)], (0, 1, 0)),
-        ([(-x, -y, -z), (x, -y, -z), (x, -y, z), (-x, -y, z)], (0, -1, 0)),
-    ]
-    return front, others
 
 
 class Builder:
@@ -104,6 +89,42 @@ class Builder:
         return {"attributes": a, "indices": i, "material": material}
 
 
+def _outline():
+    """The tile's outline, counter-clockwise from the right: a square with
+    rounded corners (CORNER_SEG points per corner)."""
+    h, r, pts = TILE_W / 2, TILE_W * CORNER, []
+    for cx, cy, a0 in ((h - r, h - r, 0), (-h + r, h - r, 90), (-h + r, -h + r, 180), (h - r, -h + r, 270)):
+        for i in range(CORNER_SEG + 1):
+            a = math.radians(a0 + 90 * i / CORNER_SEG)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return pts
+
+
+def rounded_faces():
+    """Front and back of the tile, each a fan of triangles (as quads with a
+    repeated corner) from the centre; the icon fills the square, the corners
+    are cut round. The back is mirrored so the icon reads from behind too."""
+    pts, z, quads = _outline(), TILE_D / 2, []
+    uv = lambda x, y, flip: ((-x if flip else x) / TILE_W + 0.5, 0.5 - y / TILE_W)
+    for i in range(len(pts)):
+        (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % len(pts)]
+        quads.append(([(0, 0, z), (x0, y0, z), (x1, y1, z), (x1, y1, z)], (0, 0, 1),
+                      [uv(0, 0, 0), uv(x0, y0, 0), uv(x1, y1, 0), uv(x1, y1, 0)]))
+        quads.append(([(0, 0, -z), (x1, y1, -z), (x0, y0, -z), (x0, y0, -z)], (0, 0, -1),
+                      [uv(0, 0, 1), uv(x1, y1, 1), uv(x0, y0, 1), uv(x0, y0, 1)]))
+    return quads
+
+
+def rounded_sides():
+    pts, z, quads = _outline(), TILE_D / 2, []
+    for i in range(len(pts)):
+        (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % len(pts)]
+        nx, ny = y1 - y0, x0 - x1
+        l = math.hypot(nx, ny) or 1
+        quads.append(([(x0, y0, -z), (x1, y1, -z), (x1, y1, z), (x0, y0, z)], (nx / l, ny / l, 0)))
+    return quads
+
+
 def make_gltf(animated=True):
     """The HOME Menu turns a 3D banner's whole model about the vertical axis
     (and shows roughly y -8..9 of it). So: a tile with the game's icon on both
@@ -111,17 +132,8 @@ def make_gltf(animated=True):
     strip that always faces the camera (a Y-axis billboard, set after
     conversion), so it stays readable while the tile turns."""
     b = Builder()
-    x, y, z = TILE_W / 2, TILE_W / 2, TILE_D / 2
-    front = ([(-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)], (0, 0, 1), [(0, 1), (1, 1), (1, 0), (0, 0)])
-    rear = ([(x, -y, -z), (-x, -y, -z), (-x, y, -z), (x, y, -z)], (0, 0, -1), [(0, 1), (1, 1), (1, 0), (0, 0)])
-    sides = [
-        ([(x, -y, z), (x, -y, -z), (x, y, -z), (x, y, z)], (1, 0, 0)),
-        ([(-x, -y, -z), (-x, -y, z), (-x, y, z), (-x, y, -z)], (-1, 0, 0)),
-        ([(-x, y, z), (x, y, z), (x, y, -z), (-x, y, -z)], (0, 1, 0)),
-        ([(-x, -y, -z), (x, -y, -z), (x, -y, z), (-x, -y, z)], (0, -1, 0)),
-    ]
-    faces = b.prim([front, rear], 0)
-    body = b.prim(sides, 1)            # textured too: a material without one crashes the HOME Menu
+    faces = b.prim(rounded_faces(), 0)
+    body = b.prim(rounded_sides(), 1)      # textured too: a material without one crashes the HOME Menu
     # the name strip: 4:1 like its 256x64 picture, its place baked into the vertices
     nx0, nx1, ny0, ny1 = -NAME_W / 2, NAME_W / 2, NAME_Y, NAME_Y + NAME_W / 4
     name = b.prim([([(nx0, ny0, 0), (nx1, ny0, 0), (nx1, ny1, 0), (nx0, ny1, 0)], (0, 0, 1),
@@ -247,6 +259,14 @@ def convert(pycgfx_dir, gltf, out):
     sys.path.insert(0, pycgfx_dir)
     import gltflib
     import main as pycgfx
+    from cgfx.txob import TextureFormat
+    to_txob = pycgfx.swizzler.to_txob
+    if not getattr(to_txob, "patched", False):
+        # the icon and the tile's sides are opaque: RGB565 shows smoother
+        # colours than RGBA4; the name strip needs RGBA4's transparency
+        f = lambda im: to_txob(im, TextureFormat.RGBA4 if im.size == (256, 64) else TextureFormat.RGB565)
+        f.patched = True
+        pycgfx.swizzler.to_txob = f
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "banner3d.gltf")
         with open(src, "w") as f:
@@ -268,7 +288,8 @@ def _zo(x, y):
 
 
 def _put_texture(cgfx, w, h, png):
-    """RGBA4, 8x8 tiles in Z-order, bottom row first (pycgfx's way)."""
+    """Into the model's w x h texture (RGBA4 or RGB565): 8x8 tiles in Z-order,
+    bottom row first (pycgfx's way)."""
     from PIL import Image
     im = Image.open(png).convert("RGBA")
     if im.size != (w, h):
@@ -278,15 +299,19 @@ def _put_texture(cgfx, w, h, png):
         i = cgfx.find(b"TXOB", i + 1)
         if i < 0:
             sys.exit("model has no %dx%d texture" % (w, h))
-        if i % 4 == 0 and struct.unpack_from("<2I", cgfx, i + 0x14) == (h, w) and \
-                struct.unpack_from("<I", cgfx, i + 0x30)[0] == 4:
+        fmt = struct.unpack_from("<I", cgfx, i + 0x30)[0]
+        if i % 4 == 0 and struct.unpack_from("<2I", cgfx, i + 0x14) == (h, w) and fmt in (3, 4):
             break
     off = i + 0x44 + struct.unpack_from("<i", cgfx, i + 0x44)[0]
     px = im.load()
     for y in range(h):
         for x in range(w):
             r, g, b, a = px[x, h - 1 - y]
-            v = (r * 15 + 127) // 255 << 12 | (g * 15 + 127) // 255 << 8 | (b * 15 + 127) // 255 << 4 | (a * 15 + 127) // 255
+            if fmt == 3:
+                v = (r * 31 + 127) // 255 << 11 | (g * 63 + 127) // 255 << 5 | (b * 31 + 127) // 255
+            else:
+                v = (r * 15 + 127) // 255 << 12 | (g * 15 + 127) // 255 << 8 | (b * 15 + 127) // 255 << 4 | \
+                    (a * 15 + 127) // 255
             struct.pack_into("<H", cgfx, off + (((y // 8) * (w // 8) + x // 8) * 64 + _zo(x & 7, y & 7)) * 2, v)
 
 

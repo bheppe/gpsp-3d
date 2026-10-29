@@ -488,22 +488,30 @@ static void outlined_text(u8 *img, int w, int h, const ui_font *f, int y, const 
    rgba_text(img, w, h, f, x, y, s, rgb);
 }
 
-/* the 3D banner's name strip (256x64, transparent): the name on one or two
- * lines, then the system and emulator if there's room */
+/* the 3D banner's name strip (256x64, transparent): the name big on one
+ * line with the system and emulator under it, or smaller on two lines */
 static void name_strip(const char *title, int sys, u8 *strip)
 {
    char lines[2][64], tag[64];
-   int nl = wrap_name(title, sys, &ui_font_bold, 240, lines, 2), i, y;
+   int i;
 
    memset(strip, 0, 256 * 64 * 4);
-   y = nl == 1 ? 10 : 4;
-   for (i = 0; i < nl; i++)
-      outlined_text(strip, 256, 64, &ui_font_bold, y + i * 22, lines[i], 0xFFFFFF);
-   if (nl == 1)
+   if (wrap_name(title, sys, &ui_font_big, 246, lines, 1) == 1 && !strstr(lines[0], "..."))
    {
-      snprintf(tag, sizeof(tag), "%s  -  %s", systems[sys].console, systems[sys].name);
-      outlined_text(strip, 256, 64, &ui_font_small, 38, tag, systems[sys].tag_rgb);
+      outlined_text(strip, 256, 64, &ui_font_big, 0, lines[0], 0xFFFFFF);
+      snprintf(tag, sizeof(tag), "%s  \xC2\xB7  %s", systems[sys].console, systems[sys].name);
+      outlined_text(strip, 256, 64, &ui_font_body, 44, tag, systems[sys].tag_rgb);
+      return;
    }
+   if (wrap_name(title, sys, &ui_font_title, 246, lines, 2) == 1)
+   {
+      outlined_text(strip, 256, 64, &ui_font_title, 8, lines[0], 0xFFFFFF);
+      snprintf(tag, sizeof(tag), "%s  \xC2\xB7  %s", systems[sys].console, systems[sys].name);
+      outlined_text(strip, 256, 64, &ui_font_body, 40, tag, systems[sys].tag_rgb);
+      return;
+   }
+   for (i = 0; i < 2; i++)
+      outlined_text(strip, 256, 64, &ui_font_title, 4 + i * 28, lines[i], 0xFFFFFF);
 }
 
 /* ------------------------------------------------------------------ */

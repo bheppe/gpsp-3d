@@ -342,6 +342,37 @@ void image_fit(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh)
    if (fh < 1) fh = 1;
    ox = (ow - fw) / 2;
    oy = (oh - fh) / 2;
+   if (fw > w)
+   {
+      /* scaling up: bilinear, so a 48x48 icon shown big looks smooth */
+      for (y = 0; y < fh; y++)
+         for (x = 0; x < fw; x++)
+         {
+            int fx = (int)(((2L * x + 1) * w * 256 / fw - 256) / 2), fy = (int)(((2L * y + 1) * h * 256 / fh - 256) / 2);
+            int x0, y0, ax, ay, i, k;
+            uint32_t sum[4] = { 0, 0, 0, 0 };
+            uint8_t *o = out + ((oy + y) * ow + ox + x) * 4;
+            if (fx < 0) fx = 0;
+            if (fy < 0) fy = 0;
+            x0 = fx >> 8; y0 = fy >> 8; ax = fx & 255; ay = fy & 255;
+            for (i = 0; i < 4; i++)
+            {
+               int sx = x0 + (i & 1), sy = y0 + (i >> 1);
+               uint32_t wgt = (uint32_t)((i & 1) ? ax : 256 - ax) * (uint32_t)((i >> 1) ? ay : 256 - ay);
+               const uint8_t *px;
+               if (sx >= w) sx = w - 1;
+               if (sy >= h) sy = h - 1;
+               px = rgba + (sy * w + sx) * 4;
+               for (k = 0; k < 3; k++)
+                  sum[k] += px[k] * px[3] * (wgt >> 8);
+               sum[3] += px[3] * (wgt >> 8);
+            }
+            for (k = 0; k < 3; k++)
+               o[k] = (uint8_t)(sum[3] ? sum[k] / sum[3] : 0);
+            o[3] = (uint8_t)(sum[3] >> 8);
+         }
+      return;
+   }
    for (y = 0; y < fh; y++)
       for (x = 0; x < fw; x++)
       {

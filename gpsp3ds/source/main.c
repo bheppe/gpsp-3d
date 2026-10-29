@@ -1751,7 +1751,20 @@ static bool state_load(void)
  * menu"), or its backlight is turned off (saves battery). A tap wakes it; a
  * guide being read keeps it on. */
 #define BOTTOM_IDLE_TICKS ((u64)(TICKS_PER_MS * 10000))
-static bool    lcd_ok, bottom_asleep, bottom_lcd_off;
+static bool    bottom_asleep, bottom_lcd_off;
+
+/* The bottom backlight, through gsp::Lcd. The session is opened only for
+ * the call: holding it the whole time left the HOME Menu waiting for one
+ * when HOME was pressed (it froze). */
+static bool lcd_backlight(bool on)
+{
+   Result r;
+   if (R_FAILED(gspLcdInit()))
+      return false;
+   r = on ? GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTTOM) : GSPLCD_PowerOffBacklight(GSPLCD_SCREEN_BOTTOM);
+   gspLcdExit();
+   return R_SUCCEEDED(r);
+}
 static u64     bottom_idle_t0;
 static ui_hud  hud_last;
 static bool    hud_have;
@@ -1778,7 +1791,7 @@ static void bottom_wake(void)
    bottom_asleep = false;
    if (bottom_lcd_off)
    {
-      GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTTOM);
+      lcd_backlight(true);
       bottom_lcd_off = false;
    }
    hud_show();
@@ -1790,7 +1803,7 @@ static void bottom_check_idle(void)
        svcGetSystemTick() - bottom_idle_t0 < BOTTOM_IDLE_TICKS)
       return;
    bottom_asleep = true;
-   if (opt_bottom == 2 && lcd_ok && R_SUCCEEDED(GSPLCD_PowerOffBacklight(GSPLCD_SCREEN_BOTTOM)))
+   if (opt_bottom == 2 && lcd_backlight(false))
       bottom_lcd_off = true;
    else
       hud_show();   /* the plain screen */
@@ -1802,7 +1815,7 @@ static void apt_hook(APT_HookType hook, void *param)
    /* the HOME Menu and the closing app need the bottom screen lit */
    if ((hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONEXIT) && bottom_lcd_off)
    {
-      GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTTOM);
+      lcd_backlight(true);
       bottom_lcd_off = false;
    }
    if (hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONWAKEUP)
@@ -3549,7 +3562,6 @@ int main(int argc, char **argv)
    bool dynarec;
 
    gfxInit(GSP_RGB565_OES, GSP_RGB565_OES, false);
-   lcd_ok = R_SUCCEEDED(gspLcdInit());
    gfxSetDoubleBuffering(GFX_TOP, true);
    gfxSetDoubleBuffering(GFX_BOTTOM, true);
    osSetSpeedupEnable(true);
@@ -3677,11 +3689,8 @@ int main(int argc, char **argv)
    if (audio_ok)
       ndspExit();
    gpu_guard_set("closing: releasing the screens");
-   if (lcd_ok)
-   {
-      GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTTOM);
-      gspLcdExit();
-   }
+   if (bottom_lcd_off)
+      lcd_backlight(true);
    gfxExit();
    gpu_guard_clear();
    return 0;
