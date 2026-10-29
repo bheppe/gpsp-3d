@@ -11,7 +11,9 @@ animation). Icon Maker swaps in the two pictures for each game:
 Both start as noise, so the compressed model always has room for any picture.
 
   python3 tools/make_banner3d.py --jingle          only res/jingle.wav
-  python3 tools/make_banner3d.py /path/to/pycgfx   both
+  python3 tools/make_banner3d.py /path/to/pycgfx   both, then the 3D banners of
+      gpSP 3D, Icon Maker and (if it's next to this repo, as snes9x_3ds-pr2)
+      Snes9x 3D from their banner3d-back.png / banner3d-label.png
 
 The model needs pycgfx (https://github.com/skyfloogle/pycgfx, glTF to CGFX),
 gltflib and Pillow. The camera matches pycgfx's banner-camera.gltf: at
@@ -35,6 +37,13 @@ def noise_png(w, h):
     im = Image.frombytes("RGBA", (w, h), bytes(rnd.randrange(256) for _ in range(w * h * 4)))
     b = io.BytesIO()
     im.save(b, "PNG")
+    return b.getvalue()
+
+
+def solid_png(w, h, rgb):
+    from PIL import Image
+    b = io.BytesIO()
+    Image.new("RGBA", (w, h), rgb + (255,)).save(b, "PNG")
     return b.getvalue()
 
 
@@ -99,7 +108,7 @@ def make_gltf(animated=True):
                     [(0, 1), (1, 1), (1, 0), (0, 0)])], 0)
     front, others = box(TILE_W, TILE_W, TILE_D)
     face = b.prim([front], 1)
-    sides = b.prim(others, 2, uv=False)
+    sides = b.prim(others, 2)          # textured too: a material without one crashes the HOME Menu
 
     # the sway: a little turn and float, looped
     n = 33
@@ -115,7 +124,7 @@ def make_gltf(animated=True):
     r_acc = b.add(b"".join(struct.pack("<4f", *q) for q in rots), 5126, "VEC4", n)
     p_acc = b.add(b"".join(struct.pack("<3f", *v) for v in trans), 5126, "VEC3", n)
 
-    images = [("BACK", noise_png(256, 128)), ("LABEL", noise_png(128, 128))]
+    images = [("BACK", noise_png(256, 128)), ("LABEL", noise_png(128, 128)), ("BODY", solid_png(8, 8, (74, 79, 90)))]
     return {
         "asset": {"version": "2.0", "generator": "gpSP 3D make_banner3d.py"},
         "scene": 0,
@@ -127,15 +136,15 @@ def make_gltf(animated=True):
         "meshes": [{"name": "Backdrop", "primitives": [back]},
                    {"name": "Tile", "primitives": [face, sides]}],
         "materials": [
-            {"name": "Back", "alphaMode": "BLEND",
+            {"name": "Back",
              "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "roughnessFactor": 1,
                                       "metallicFactor": 0}},
             {"name": "Label", "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}, "roughnessFactor": 0.6,
                                                        "metallicFactor": 0}},
-            {"name": "Body", "pbrMetallicRoughness": {"baseColorFactor": [0.29, 0.31, 0.35, 1],
-                                                      "roughnessFactor": 0.5, "metallicFactor": 0}},
+            {"name": "Body", "pbrMetallicRoughness": {"baseColorTexture": {"index": 2}, "roughnessFactor": 0.5,
+                                                      "metallicFactor": 0}},
         ],
-        "textures": [{"source": 0, "sampler": 0}, {"source": 1, "sampler": 0}],
+        "textures": [{"source": 0, "sampler": 0}, {"source": 1, "sampler": 0}, {"source": 2, "sampler": 0}],
         "samplers": [{"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071}],
         "images": [{"name": nm, "mimeType": "image/png",
                     "uri": "data:image/png;base64," + base64.b64encode(png).decode()} for nm, png in images],
@@ -189,11 +198,16 @@ def hardware_fixes(cgfx):
     from cgfx.primitives import VertexAttributeUsage
     model = cgfx.data.models["COMMON"]
     bones = list(model.skeleton.bones)
+    materials = list(model.materials)
     for mesh in model.meshes.data.contents:
         owners = [b for b in bones if mesh.name == b or mesh.name.startswith(b + "_")]
         if not owners:
             sys.exit("no bone for mesh " + mesh.name)
         mesh.mesh_node_name = max(owners, key=len)
+        # pycgfx names every mesh of a node after its last material: make them unique
+        mesh.name = mesh.mesh_node_name + "_" + materials[mesh.material_index]
+    for shape, mesh in zip(model.shapes.data.contents, model.meshes.data.contents):
+        shape.name = mesh.name
     for shape in model.shapes.data.contents:
         for ps in shape.primitive_sets.data.contents:
             if ps.skinning_mode != 0:
@@ -230,6 +244,84 @@ def convert(pycgfx_dir, gltf, out):
     print("wrote", os.path.relpath(out, os.path.join(RES, "..")), len(data), "bytes")
 
 
+# ---- the apps' own banners, from the same model ----
+
+def _zo(x, y):
+    return sum((((x >> b) & 1) << (2 * b)) | (((y >> b) & 1) << (2 * b + 1)) for b in range(3))
+
+
+def _put_texture(cgfx, w, h, png):
+    """RGBA4, 8x8 tiles in Z-order, bottom row first (pycgfx's way)."""
+    from PIL import Image
+    im = Image.open(png).convert("RGBA")
+    if im.size != (w, h):
+        sys.exit("%s should be %dx%d" % (png, w, h))
+    i = 0
+    while True:
+        i = cgfx.find(b"TXOB", i + 1)
+        if i < 0:
+            sys.exit("model has no %dx%d texture" % (w, h))
+        if i % 4 == 0 and struct.unpack_from("<2I", cgfx, i + 0x14) == (h, w) and \
+                struct.unpack_from("<I", cgfx, i + 0x30)[0] == 4:
+            break
+    off = i + 0x44 + struct.unpack_from("<i", cgfx, i + 0x44)[0]
+    px = im.load()
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, h - 1 - y]
+            v = (r * 15 + 127) // 255 << 12 | (g * 15 + 127) // 255 << 8 | (b * 15 + 127) // 255 << 4 | (a * 15 + 127) // 255
+            struct.pack_into("<H", cgfx, off + (((y // 8) * (w // 8) + x // 8) * 64 + _zo(x & 7, y & 7)) * 2, v)
+
+
+def _lz11_stored(data):
+    """LZ11 with no matches (every block flag 0): valid, just not smaller."""
+    out = bytearray(struct.pack("<I", 0x11 | len(data) << 8))
+    for i in range(0, len(data), 8):
+        out.append(0)
+        out += data[i:i + 8]
+    return bytes(out)
+
+
+def _cwav_of(bnr):
+    with open(bnr, "rb") as f:
+        d = f.read()
+    return d[struct.unpack_from("<I", d, 0x84)[0]:]
+
+
+def app_banner(model, back, label, cwav, out):
+    with open(model, "rb") as f:
+        cgfx = bytearray(f.read())
+    _put_texture(cgfx, 256, 128, back)
+    _put_texture(cgfx, 128, 128, label)
+    packed = _lz11_stored(bytes(cgfx))
+    cwav_off = (0x88 + len(packed) + 0x1F) & ~0x1F
+    hdr = bytearray(0x88)
+    hdr[0:4] = b"CBMD"
+    struct.pack_into("<I", hdr, 0x08, 0x88)
+    struct.pack_into("<I", hdr, 0x84, cwav_off)
+    data = bytes(hdr) + packed + bytes(cwav_off - 0x88 - len(packed)) + cwav
+    with open(out, "wb") as f:
+        f.write(data)
+    print("wrote", out, len(data), "bytes")
+
+
+def make_app_banners():
+    root = os.path.abspath(os.path.join(RES, "..", ".."))
+    with open(os.path.join(RES, "jingle.bcwav"), "rb") as f:
+        jingle = f.read()
+    gp = os.path.join(root, "gpsp3ds", "res")
+    app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(gp, "banner3d-back.png"),
+               os.path.join(gp, "banner3d-label.png"), jingle, os.path.join(gp, "banner3d.bnr"))
+    # Icon Maker: the still model for now, to tell an animation problem apart
+    app_banner(os.path.join(RES, "banner3d-still.cgfx"), os.path.join(RES, "banner3d-back.png"),
+               os.path.join(RES, "banner3d-label.png"), jingle, os.path.join(RES, "banner3d-app.bnr"))
+    snes = os.path.join(root, "..", "snes9x_3ds-pr2", "resources")
+    if os.path.isfile(os.path.join(snes, "banner3d-back.png")):
+        app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(snes, "banner3d-back.png"),
+                   os.path.join(snes, "banner3d-label.png"), _cwav_of(os.path.join(snes, "banner.bnr")),
+                   os.path.join(snes, "banner.bnr"))
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -241,6 +333,7 @@ def main():
     convert(pycgfx_dir, make_gltf(True), os.path.join(RES, "banner3d.cgfx"))
     # the same without the sway, in case an animated banner gives trouble
     convert(pycgfx_dir, make_gltf(False), os.path.join(RES, "banner3d-still.cgfx"))
+    make_app_banners()
 
 
 if __name__ == "__main__":
