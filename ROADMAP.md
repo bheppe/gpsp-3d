@@ -1,7 +1,7 @@
 # gpSP 3D roadmap
 
 What's been reported, what's done, and what's next. Reports come from
-[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.4 (updated Oct 28).
+[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.4, with v0.1.5 in testing (updated Oct 29).
 
 **Status key:** ✅ done · 🧪 done, needs testing on real hardware · 🔧 next up · 📋 planned · 💤 later / big project
 
@@ -41,31 +41,57 @@ What's been reported, what's done, and what's next. Reports come from
 
 ## Next up
 
-**gpSP 3D v0.1.5: requests and polish** (first release through the CI pipeline: test the Nightly, then publish)
+**gpSP 3D v0.1.5: fixes and quick wins** (first release through the CI pipeline: test the Nightly, then publish)
 
 | Change | Asked by | Status |
 |---|---|---|
-| **Tilt sensor** for Yoshi Topsy-Turvy and Koro Koro Puzzle Happy Panechu, from the 3DS accelerometer (like the gyro for WarioWare) | After-Pop-2000 (Reddit) | 🔧 |
-| **New app icons** so gpSP 3D and Snes9x 3D are easy to tell apart on the HOME Menu | TheBigMacWhopperGuy (Reddit) | 🔧 |
-| **More LCD filters**, plus your own PNG overlay from the SD card (the 3DS GPU has no pixel shaders, so RetroArch shaders can't run, but overlays can) | King_Hikikomori (Reddit) | 🔧 |
-| **About screen** crediting gpSP's authors and contributors (was #15) | bheppe | 🔧 |
+| **Freezes on Old 3DS**: the log was written to the SD card while playing; now it's kept in memory and written only when the menu opens or the game closes | miguelcepoi (Discord) | 🧪 waiting on his test |
+| **No SD card writes while playing** at all (log, as above; saves were already written only at the menu, sleep and exit) | bheppe | 🧪 |
+| **System → Real-time clock**: Auto / On / Off, for Pokémon games whose clock the auto check misses | Individual_Emu673 (Reddit) | 🧪 |
+| **System → Startup**: the GBA BIOS intro, when `gba_bios.bin` is in `sdmc:/3ds/gpsp3d/` | Individual_Emu673 (Reddit) | 🧪 |
+| **Tilt sensor** for Yoshi Topsy-Turvy and Koro Koro Puzzle Happy Panechu, from the 3DS accelerometer | After-Pop-2000 (Reddit) | 🧪 needs the games |
+| **System → Bottom screen**: Always on / Dim after 10 s / Off after 10 s; a tap wakes it, the guide keeps it on | PJ_MJ (Discord) | 🧪 |
+| **Smoother guide scrolling** with flick (from Snes9x 3D) | cabjoy (Discord) | 🧪 |
+| **System → Credits**: gpSP's authors and contributors | bheppe | 🧪 |
+| **Icon Maker 0.1.4: accented letters** (Pokémon no longer shows "Pok??mon") | PJ_MJ (Discord) | 🧪 |
+| **Icon Maker 0.1.4: banner style** (SELECT): blue background, no background, or **3D pop-out with a jingle** (the icon floats out of the screen and sways) | PJ_MJ (Discord), bheppe | 🧪 3D needs testing |
+| **New app icons** so gpSP 3D and Snes9x 3D are easy to tell apart | TheBigMacWhopperGuy (Reddit) | 🔧 picking a design |
+| `OPT=-O3` test build of the app code (the core is already -O3) | Gaming4LifeDE (Discord) | 🔧 measure |
 
-**Snes9x 3D v1.61-layers8: controls** ([snes9x_3ds](https://github.com/bheppe/snes9x_3ds), before v0.1.5)
+**Snes9x 3D v1.61-layers8: controls** ([snes9x_3ds](https://github.com/bheppe/snes9x_3ds))
 
 | Change | Asked by | Status |
 |---|---|---|
-| **Hotkey combos** | cabjoy (Discord) | 🔧 |
-| **Two depth profiles per game**, switched with a hotkey (e.g. overworld vs battle in EarthBound) | Finn (Discord) | 🔧 |
-| **True 1:1 integer scale** | Finn (Discord) | 🔧 |
-| **Guide viewer** on the bottom screen, like gpSP 3D's | cabjoy (Discord) | 🔧 |
+| **Hotkey combos** | cabjoy (Discord) | ✅ |
+| **True 1:1 integer scale** (No Stretch 1:1) | Finn (Discord) | ✅ |
+| **Two depth profiles per game**, switched with a hotkey (e.g. overworld vs battle in EarthBound) | Finn (Discord) | 🧪 |
+| **Guide viewer** on the bottom screen, like gpSP 3D's | cabjoy (Discord) | 🧪 |
 | Donkey Kong Country 2: outline glitch | margret (Discord) | 📋 needs investigating |
 
-**Later, each as its own release**
+**gpSP 3D v0.1.6: performance and updates**
 
 | Plan | Status |
 |---|---|
-| **v0.1.6: performance.** Mario Golf, the Super Mario Galaxy port, Golden Sun and WarioWare: Twisted on Old 3DS (#8, #10) likely share a cause: the dynarec's register handling | 📋 |
-| **Icon Maker v0.2: box art download** when making an icon (ScreenScraper, SteamGridDB or RetroArch's libretro-thumbnails, which needs no account) | 📋 Gaming4LifeDE, Surge And Finn (Discord) |
+| **New 3DS: drawing on its own CPU core** instead of sharing core 2 with the system | 📋 |
+| **Dynarec register allocation**: Mario Golf, the Super Mario Galaxy port, Golden Sun and WarioWare: Twisted on Old 3DS (#8, #10) | 📋 |
+| **Update check in the app**: tells you when a new version is out (install it with Universal-Updater) | 📋 DukeOfJelly (Discord) |
+| **More LCD filters**, plus your own PNG overlay from the SD card | 📋 King_Hikikomori (Reddit) |
+
+**Icon Maker v0.2: box art**
+
+| Plan | Status |
+|---|---|
+| **Box art download** from libretro-thumbnails (no account), matched by the ROM's CRC32, with a name search for other regions | 📋 Gaming4LifeDE, Surge, Finn (Discord) |
+| Community art repo for original icons and banners (no copies of official box art) | 📋 |
+| Ready-to-show copies of the thumbnails, so making a whole folder stays fast | 📋 |
+
+**Later**
+
+| Plan | Status |
+|---|---|
+| Tilt the layers with the 3DS (parallax from the gyroscope) | 💤 |
+| DS game forwarders in Icon Maker (nds-bootstrap) | 💤 |
+| Game library with RomM sync | 💤 Gaming4LifeDE |
 | **Genesis 3D** | 💤 next big project |
 | Screenshots and 3D GIFs in the READMEs | 📋 |
 | Submit to Universal-DB (the main Universal-Updater store) | 📋 later |
@@ -74,7 +100,7 @@ What's been reported, what's done, and what's next. Reports come from
 
 | # | Problem or request | Reported by | Status |
 |---|---|---|---|
-| 6 | **New 3DS: use the extra CPU cores** for drawing instead of sharing core 2 with the system | — | 📋 |
+| 6 | **New 3DS: use the extra CPU cores** for drawing instead of sharing core 2 with the system | — | 📋 v0.1.6 |
 | 7 | Need for Speed Underground: ~4 fps on the title screen, then freezes | myownfriend (#2) | 🔧 needs the game to reproduce |
 | 8 | Stutter in Mario Golf: Advance Tour, Super Mario Galaxy (GBA port), NFS Underground; WarioWare: Twisted a little choppy on Old 3DS (smooth on New 3DS) | Discord, After-Pop-2000 (Reddit) | 🔧 Mario Golf: much better in v0.1.3 (RAM code rewrites cost about half), still slows down on the course view and the swing on Old 3DS. Galaxy port: 55% -> about 76% speed on Old 3DS; the rest needs a bigger dynarec change (register allocation), on hold. Pokémon GS Chronicles: fine |
 | 9 | Classic NES Series: Castlevania doesn't boot | Male_Inkling | 📋 |
@@ -83,9 +109,10 @@ What's been reported, what's done, and what's next. Reports come from
 | 12 | Faster 3D drawing on Old 3DS (3D pictures refresh ~15-30/s) | bheppe | 📋 |
 | 13 | RetroAchievements | MysticFlipFlop (#1, open) | 📋 casual mode first; hardcore needs 6 months of releases |
 | 14 | Link cable / wireless adapter multiplayer, e.g. **Pokémon trading with RetroArch's gpSP** on a PC, phone or another 3DS | Han_Solo6712, Shot_Jicama4942 (Reddit), Discord | 📋 after Genesis 3D. The gpSP core already emulates the wireless adapter and link cable (packets over RetroArch netplay); gpSP 3D needs RetroArch's netplay protocol (packet mode) and a host/join menu |
-| 15 | In-app About screen crediting gpSP's authors | bheppe | 🔧 in v0.1.5 |
+| 15 | In-app About screen crediting gpSP's authors | bheppe | 🧪 System → Credits in v0.1.5 |
 | 16 | Per-layer 3D for other emulators (PS1 / PCSX) | _SleepyLark_, LargoLaGrande1, goldaxis | 💤 |
 | 17 | Smashing Drive: 60-70% speed on Old 3DS (software 3D) | Advil Lavs (Discord) | 🔧 needs a profile log from a race |
+| 18 | Random freezes on Old 3DS after a while | miguelcepoi (Discord) | 🧪 likely the SD log writes, fixed in v0.1.5 |
 
 Tip while waiting for fixes: if the stats panel says **Core 2: off (drawing on main core)**, turn on
 **System → Draw on core 2**; drawing on the main core costs a lot of speed.

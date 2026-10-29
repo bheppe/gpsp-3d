@@ -24,7 +24,10 @@ APP_AUTHOR      := gpSP team, bheppe
 ICON            := res/icon.png
 
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
-CFLAGS   := -g -Wall -O2 -mword-relocations -ffunction-sections $(ARCH) $(INCLUDE) -D__3DS__ -DUSE_CTRULIB_2
+# the core (libgpsp) is built with -O3 by the main Makefile; try the app's
+# own code the same way with: OPT=-O3 bash build-gpsp3ds.sh
+OPT      ?= -O2
+CFLAGS   := -g -Wall $(OPT) -mword-relocations -ffunction-sections $(ARCH) $(INCLUDE) -D__3DS__ -DUSE_CTRULIB_2
 CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
