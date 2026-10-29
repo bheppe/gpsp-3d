@@ -25,5 +25,9 @@ void guide_draw(void);
 enum { GUIDE_TOUCH_DOWN, GUIDE_TOUCH_HELD, GUIDE_TOUCH_UP };
 enum { GUIDE_REDRAW = 1, GUIDE_MENU = 2 };
 int guide_touch(int phase, int x, int y);
+/* once a frame while shown: a flick keeps scrolling. Returns GUIDE_REDRAW or 0. */
+int guide_tick(void);
+/* the canvas was drawn over (menu, stats): the next guide_draw redraws everything */
+void guide_invalidate(void);
 
 #endif

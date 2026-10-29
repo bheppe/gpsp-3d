@@ -28,6 +28,9 @@ void ui_rrect_outline(int x, int y, int w, int h, int r, int t, uint16_t c);
 void ui_circle(int cx, int cy, int r, uint16_t c);
 void ui_arrow(int cx, int cy, int size, int dir /* -1 left, 1 right, 2 up, -2 down */, uint16_t c);
 
+/* text drawn only on rows y0 <= y < y1 (ui_set_clip_y(0, UI_H) for all) */
+void ui_set_clip_y(int y0, int y1);
+
 int  ui_text_w(const ui_font *f, const char *s);
 /* draws s with its top-left at (x, y); clips to max_w pixels with "..." if
  * max_w > 0. Returns the x after the text. */

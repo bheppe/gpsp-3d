@@ -40,6 +40,8 @@ static int    nlines, scroll_px;
 static char   g_file[600], g_pos[600];
 static const char *g_err;
 static int    t_mode, t_last_y;   /* 0 none, 1 drag, 2 scroll bar */
+static float  t_vel, fling;       /* drag speed and the speed it keeps after letting go, px/frame */
+static int    drawn_scroll = -1;  /* scroll position the canvas shows, -1 = redraw everything */
 
 bool guide_available(void) { return text != NULL; }
 const char *guide_file(void) { return g_file; }
@@ -224,6 +226,7 @@ void guide_close(void)
    free(text); text = NULL;
    free(lines); lines = NULL;
    nlines = 0; scroll_px = 0; t_mode = 0;
+   fling = 0; drawn_scroll = -1;
    guide_shown = false;
    g_err = NULL;
    g_file[0] = g_pos[0] = 0;
@@ -319,26 +322,64 @@ static void button(int x, int y, int w, int h, const char *label, int arrow, boo
       ui_text_center(&ui_font_bold, x + w / 2, y + (h - ui_font_bold.height) / 2, label, C_TEXT);
 }
 
-void guide_draw(void)
+void guide_invalidate(void) { drawn_scroll = -1; }
+
+/* the text lines that cover rows y0 <= y < y1 of the text area */
+static void draw_text_rows(int y0, int y1)
 {
    char buf[160];
-   int first, y, i, ms = max_scroll();
-
-   ui_clear(C_BG);
-   if (!text) return;
-
-   /* text */
-   first = scroll_px / LINE_H;
+   int i, y;
+   ui_fill(0, y0, BAR_X + 6, y1 - y0, C_BG);
+   ui_set_clip_y(y0, y1);
+   i = scroll_px / LINE_H;
    y = AREA_Y - scroll_px % LINE_H;
-   for (i = first; i < nlines && y < AREA_Y + AREA_H; i++, y += LINE_H)
+   for (; i < nlines && y < y1; i++, y += LINE_H)
    {
-      int len = lines[i].len < (int)sizeof(buf) - 1 ? lines[i].len : (int)sizeof(buf) - 1;
+      int len;
+      if (y + LINE_H <= y0) continue;
+      len = lines[i].len < (int)sizeof(buf) - 1 ? lines[i].len : (int)sizeof(buf) - 1;
       memcpy(buf, text + lines[i].off, len);
       buf[len] = 0;
       ui_text(&ui_font_small, TEXT_X, y, buf, C_TEXT, 0);
    }
+   ui_set_clip_y(0, UI_H);
+}
+
+void guide_draw(void)
+{
+   char buf[160];
+   int first, d = drawn_scroll >= 0 ? scroll_px - drawn_scroll : AREA_H, ms = max_scroll();
+
+   if (!text) { ui_clear(C_BG); return; }
+
+   /* text: a small scroll moves what's already drawn and draws only the rows that
+      came into view, so dragging stays smooth */
+   if (d > -AREA_H / 2 && d < AREA_H / 2)
+   {
+      int y;
+      if (d > 0)
+      {
+         for (y = AREA_Y; y < AREA_Y + AREA_H - d; y++)
+            memcpy(&ui_canvas[y * UI_W], &ui_canvas[(y + d) * UI_W], (BAR_X + 6) * 2);
+         draw_text_rows(AREA_Y + AREA_H - d, AREA_Y + AREA_H);
+      }
+      else if (d < 0)
+      {
+         for (y = AREA_Y + AREA_H - 1; y >= AREA_Y - d; y--)
+            memcpy(&ui_canvas[y * UI_W], &ui_canvas[(y + d) * UI_W], (BAR_X + 6) * 2);
+         draw_text_rows(AREA_Y, AREA_Y - d);
+      }
+   }
+   else
+   {
+      ui_clear(C_BG);
+      draw_text_rows(AREA_Y, AREA_Y + AREA_H);
+   }
+   drawn_scroll = scroll_px;
+   first = scroll_px / LINE_H;
 
    /* scroll bar */
+   ui_fill(BAR_X + 6, AREA_Y, UI_W - BAR_X - 6, AREA_H, C_BG);
    ui_rrect(BAR_X + 8, AREA_Y, 6, AREA_H, 3, C_PANEL);
    if (ms > 0)
    {
@@ -382,6 +423,8 @@ int guide_touch(int phase, int x, int y)
    if (phase == GUIDE_TOUCH_DOWN)
    {
       t_mode = 0;
+      fling = 0;
+      t_vel = 0;
       if (y < HEAD_H && x >= 224)
          return GUIDE_MENU;
       if (y >= FOOT_Y)
@@ -400,10 +443,36 @@ int guide_touch(int phase, int x, int y)
    }
    else if (phase == GUIDE_TOUCH_HELD)
    {
-      if (t_mode == 1) { scroll_px += t_last_y - y; t_last_y = y; clamp(); }
+      if (t_mode == 1)
+      {
+         int dy = t_last_y - y;
+         scroll_px += dy;
+         t_vel = t_vel * 0.5f + dy * 0.5f;
+         t_last_y = y;
+         clamp();
+      }
       else if (t_mode == 2) bar_to(y);
    }
    else
+   {
+      if (t_mode == 1 && (t_vel > 1.5f || t_vel < -1.5f))
+         fling = t_vel;   /* a flick keeps scrolling and slows down */
       t_mode = 0;
+   }
    return scroll_px != before || t_mode != was ? GUIDE_REDRAW : 0;
+}
+
+int guide_tick(void)
+{
+   int before = scroll_px;
+   if (!text || fling == 0)
+      return 0;
+   scroll_px += (int)(fling + (fling > 0 ? 0.5f : -0.5f));
+   fling *= 0.94f;
+   if (fling > -0.5f && fling < 0.5f)
+      fling = 0;
+   clamp();
+   if (scroll_px == before)
+      fling = 0;   /* reached the top or the end */
+   return scroll_px != before ? GUIDE_REDRAW : 0;
 }

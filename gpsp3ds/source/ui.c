@@ -13,10 +13,18 @@ static inline uint16_t blend(uint16_t d, uint16_t s, int a /* 0..256 */)
    return (uint16_t)((dr << 11) | (dg << 5) | db);
 }
 
+static int clip_y0 = 0, clip_y1 = UI_H;
+
+void ui_set_clip_y(int y0, int y1)
+{
+   clip_y0 = y0 < 0 ? 0 : y0;
+   clip_y1 = y1 > UI_H ? UI_H : y1;
+}
+
 static inline void plot(int x, int y, uint16_t c, int a)
 {
    uint16_t *p;
-   if ((unsigned)x >= UI_W || (unsigned)y >= UI_H || a <= 0)
+   if ((unsigned)x >= UI_W || y < clip_y0 || y >= clip_y1 || a <= 0)
       return;
    p = &ui_canvas[y * UI_W + x];
    *p = a >= 256 ? c : blend(*p, c, a);

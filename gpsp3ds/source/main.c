@@ -150,6 +150,9 @@ static int opt_frameskip = 1; /* 0 = off, 1 = auto (skip drawing a frame core 2 
 static int opt_ff_toggle = 0;
 static int opt_ff_speed = 0;
 static bool ff_on;               /* toggle mode: fast forward is on */
+static int opt_rtc;           /* real-time clock: 0 Auto (the core decides), 1 On, 2 Off */
+static int opt_intro;         /* 1: start games with the GBA intro (needs the user's gba_bios.bin) */
+static int opt_bottom;        /* bottom screen while playing: 0 always on, 1 dim, 2 off (after 10 s) */
 static int opt_slot;          /* save-state slot 0..9 */
 static int opt_smooth = 1;    /* scaling (GPU display): 0 Sharp, 1 Crisp, 2 Smooth */
 static int opt_crt;           /* screen effect (GPU display): 0 Off, 1 Scanlines, 2 LCD grid */
@@ -342,6 +345,12 @@ static void config_load(void)
          opt_ff_toggle = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "ff_speed"))
          opt_ff_speed = clampi(atoi(eq), 0, 3);
+      else if (!strcmp(line, "rtc"))
+         opt_rtc = clampi(atoi(eq), 0, 2);
+      else if (!strcmp(line, "startup_intro"))
+         opt_intro = atoi(eq) ? 1 : 0;
+      else if (!strcmp(line, "bottom_screen"))
+         opt_bottom = clampi(atoi(eq), 0, 2);
       else if (!strcmp(line, "profiler"))
          opt_profiler = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "saturation"))
@@ -404,10 +413,10 @@ static void config_save(void)
       return;
    fprintf(f, "last_dir=%s\nframe_skip=%d\nprofiler=%d\ncolor_style=%d\ncore2=%d\ndisplay=%d\ngpu=%d\n"
          "slot=%d\nscaling=%d\naudio_stretch=%d\ncore2_low_prio=%d\nsaturation=%d\nbrightness=%d\n3d_gap_fill=%d\nscreen_effect=%d\n"
-         "ff_toggle=%d\nff_speed=%d\n",
+         "ff_toggle=%d\nff_speed=%d\nrtc=%d\nstartup_intro=%d\nbottom_screen=%d\n",
          cur_dir, opt_frameskip, opt_profiler, opt_colorcorr, opt_core2, opt_display, opt_gpu,
          opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill, opt_crt,
-         opt_ff_toggle, opt_ff_speed);
+         opt_ff_toggle, opt_ff_speed, opt_rtc, opt_intro, opt_bottom);
    /* no menu entries for these: written even when empty so they can be found */
    fprintf(f, "save_dir=%s\nstate_dir=%s\nsave_ext=%s\n", opt_save_dir, opt_state_dir, opt_save_ext);
    /* the all-games 3D settings (a game with its own profile keeps them aside) */
@@ -1484,36 +1493,67 @@ static int16_t input_state(unsigned port, unsigned device, unsigned index, unsig
 static char core_msg[96];
 static bool core_msg_new;
 
+/* Core warnings are kept in memory and written to the log file when the menu
+ * opens or the game closes: opening a file on the SD card can take tens of
+ * milliseconds, which froze the game for a moment every time a warning came
+ * up during play. */
+static char   log_buf[8192];
+static size_t log_len;
+static u32    log_dropped;
+
+static void log_flush(void)
+{
+   FILE *f;
+   if (!log_len && !log_dropped)
+      return;
+   f = fopen(APP_DIR "/gpsp3d.log", "a");
+   if (f)
+   {
+      fwrite(log_buf, 1, log_len, f);
+      if (log_dropped)
+         fprintf(f, "(%lu more messages not logged)\n", (unsigned long)log_dropped);
+      fclose(f);
+   }
+   log_len = 0;
+   log_dropped = 0;
+}
+
 static void core_log(enum retro_log_level level, const char *fmt, ...)
 {
    char buf[256];
    va_list ap;
-   FILE *f;
+   int n;
    if (level < RETRO_LOG_WARN)
       return;
    va_start(ap, fmt);
-   vsnprintf(buf, sizeof(buf), fmt, ap);
+   n = vsnprintf(buf, sizeof(buf), fmt, ap);
    va_end(ap);
-   f = fopen(APP_DIR "/gpsp3d.log", "a");
-   if (f)
+   if (n < 0)
+      return;
+   if (n >= (int)sizeof(buf))
+      n = sizeof(buf) - 1;
+   if (log_len + n > sizeof(log_buf))
    {
-      fputs(buf, f);
-      fclose(f);
+      log_dropped++;
+      return;
    }
+   memcpy(log_buf + log_len, buf, n);
+   log_len += n;
 }
 
 static const char *var_value(const char *key)
 {
    if (!strcmp(key, "gpsp_drc"))              return "enabled";
    if (!strcmp(key, "gpsp_bios"))             return "auto";
-   if (!strcmp(key, "gpsp_boot_mode"))        return "game";
+   if (!strcmp(key, "gpsp_boot_mode"))        /* the intro is in Nintendo's BIOS only */
+      return opt_intro && file_exists(APP_DIR "/gba_bios.bin") ? "bios" : "game";
    if (!strcmp(key, "gpsp_sound_rate"))       return "32768";
    if (!strcmp(key, "gpsp_frameskip"))        return "disabled";   /* our own, see frame_should_skip */
    if (!strcmp(key, "gpsp_profile"))          return opt_profiler ? "enabled" : "disabled";
    if (!strcmp(key, "gpsp_color_correction")) return "disabled"; /* done in blit_to_top */
    if (!strcmp(key, "gpsp_frame_mixing"))     return "disabled";
    if (!strcmp(key, "gpsp_sprlim"))           return "disabled";
-   if (!strcmp(key, "gpsp_rtc"))              return "auto";
+   if (!strcmp(key, "gpsp_rtc"))              return opt_rtc == 1 ? "enabled" : opt_rtc == 2 ? "disabled" : "auto";
    if (!strcmp(key, "gpsp_rtc_time_source"))  return "system";
    if (!strcmp(key, "gpsp_rumble"))           return "disabled";
    if (!strcmp(key, "gpsp_serial"))           return "disabled";
@@ -1706,9 +1746,64 @@ static bool state_load(void)
    return n == state_size && retro_unserialize(state_buf, state_size);
 }
 
+/* Bottom screen while playing (System > Bottom screen): after 10 s without a
+ * touch the stats screen is dimmed, or its backlight turned off (saves
+ * battery). A tap wakes it; a guide being read keeps it on. */
+#define BOTTOM_IDLE_TICKS ((u64)(TICKS_PER_MS * 10000))
+static bool    lcd_ok, bottom_asleep, bottom_lcd_off;
+static u64     bottom_idle_t0;
+static ui_hud  hud_last;
+static bool    hud_have;
+
+static void hud_show(void)
+{
+   if (guide_shown || !hud_have || bottom_lcd_off)
+      return;
+   scr_hud(&hud_last);
+   if (bottom_asleep)
+      ui_fill_alpha(0, 0, UI_W, UI_H, 0, 210);
+   ui_present();
+}
+
+static void bottom_wake(void)
+{
+   bottom_idle_t0 = svcGetSystemTick();
+   if (!bottom_asleep)
+      return;
+   bottom_asleep = false;
+   if (bottom_lcd_off)
+   {
+      GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTTOM);
+      bottom_lcd_off = false;
+   }
+   hud_show();
+}
+
+static void bottom_check_idle(void)
+{
+   if (!opt_bottom || bottom_asleep || guide_shown ||
+       svcGetSystemTick() - bottom_idle_t0 < BOTTOM_IDLE_TICKS)
+      return;
+   bottom_asleep = true;
+   if (opt_bottom == 2 && lcd_ok && R_SUCCEEDED(GSPLCD_PowerOffBacklight(GSPLCD_SCREEN_BOTTOM)))
+      bottom_lcd_off = true;
+   else
+      hud_show();   /* dimmed */
+}
+
 static void apt_hook(APT_HookType hook, void *param)
 {
    (void)param;
+   /* the HOME Menu and the closing app need the bottom screen lit */
+   if ((hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONEXIT) && bottom_lcd_off)
+   {
+      GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTTOM);
+      bottom_lcd_off = false;
+   }
+   if (hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONWAKEUP)
+      bottom_asleep = false;   /* starts counting again when the game is back */
+   if (hook == APTHOOK_ONRESTORE || hook == APTHOOK_ONWAKEUP)
+      bottom_idle_t0 = svcGetSystemTick();
    if (hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONSLEEP || hook == APTHOOK_ONEXIT)
       sram_flush(false);
    /* Give core 2 back to the system while we're in the background: with
@@ -2072,6 +2167,7 @@ static bool game_load(void)
    sram_load();
    profile_load_fwd();
    guide_open(rom_path, rom_name, APP_DIR);
+   log_flush();   /* warnings from loading, before the game starts */
    return true;
 }
 
@@ -2082,6 +2178,7 @@ static void game_unload(void)
    sram_flush(true);
    guide_close();
    retro_unload_game();
+   log_flush();
    game_loaded = false;
    if (gyro_on)
    {
@@ -2332,7 +2429,7 @@ enum {
    /* Speed */
    M_SKIP, M_ASTRETCH, M_FFMODE, M_FFSPEED, M_STATS,
    /* System */
-   M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_SAVEINFO, M_ABOUT,
+   M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_RTC, M_INTRO, M_BOTTOM, M_SAVEINFO, M_ABOUT, M_CREDITS,
    M_HDR
 };
 
@@ -2498,6 +2595,16 @@ static void menu_build(int tab)
          mrow_choice(M_PRIO, "Core 2 priority", opt_lowprio ? "Low" : "High", "High (recommended): drawing first.\nLow: system services on core 2 first.");
          mrow_add(M_C2TEST, ROW_ACTION, "Core 2 speed test", "Measures how much of core 2 this app\ngets (takes 3 seconds).");
          mrows[mrow_n - 1].r.value = core2_result[0] ? core2_result : NULL;
+         {
+            static const char *const rtc_names[] = { "Auto", "On", "Off" };
+            static const char *const bottom_names[] = { "Always on", "Dim after 10 s", "Off after 10 s" };
+            mrow_choice(M_RTC, "Real-time clock", rtc_names[opt_rtc],
+                  "On: for Pokemon hacks that say the internal\nbattery has run dry. Applies when a game starts.");
+            mrow_choice(M_INTRO, "Startup", opt_intro ? "GBA intro" : "Skip intro",
+                  "GBA intro needs your own gba_bios.bin in\nsdmc:/3ds/gpsp3d/. Applies when a game starts.");
+            mrow_choice(M_BOTTOM, "Bottom screen", bottom_names[opt_bottom],
+                  "While playing, after 10 s without a touch.\nTap to wake. Not while a guide is open.");
+         }
          if (save_path[0])
          {
             /* where this game's save is: the folder, and the full path
@@ -2515,6 +2622,8 @@ static void menu_build(int tab)
          snprintf(about, sizeof(about), "gpSP 3D " GPSP3D_VERSION);
          mrow_add(M_ABOUT, ROW_INFO, "Version", "gpSP (libretro, GPL-2), mGBA 3DS GPU\ncode (MPL-2.0), Inter font (OFL).");
          mrows[mrow_n - 1].r.value = about;
+         mrow_add(M_CREDITS, ROW_INFO, "Credits", "gpSP: Exophase, notaz, davidgfnet and others.\nThanks: michvllni, hspman69 and all testers.");
+         mrows[mrow_n - 1].r.value = "bheppe";
          break;
       }
    }
@@ -2614,6 +2723,9 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
       case M_ASTRETCH: opt_audio_stretch ^= 1; break;
       case M_FFMODE:   opt_ff_toggle ^= 1; ff_on = false; break;
       case M_FFSPEED:  CYCLEV(opt_ff_speed, 4); break;
+      case M_RTC:      CYCLEV(opt_rtc, 3); break;
+      case M_INTRO:    opt_intro ^= 1; break;
+      case M_BOTTOM:   CYCLEV(opt_bottom, 3); break;
       case M_STATS:    opt_profiler ^= 1; vars_changed = true; break;
       case M_CORE2:
          opt_core2 ^= 1;
@@ -2669,6 +2781,7 @@ static bool game_menu(void)
    if (audio_ok)
       ndspChnSetPaused(0, true);
    sram_flush(false);
+   log_flush();
    confirm_id = 0;
 
    while (aptMainLoop())
@@ -3083,7 +3196,7 @@ static void run_game(void)
    u32 prev_underruns = audio_underruns, prev_drops = audio_drops;
    (void)prev_drops;
    u32 frames = 0, frames_total = 0, drawn_win = 0, ff_extra_win = 0;
-   bool ff_shown = false, hud_now = false, open_menu, guide_dirty = false;
+   bool ff_shown = false, hud_now = false, open_menu, guide_dirty = false, eat_touch = false;
 
    {
       ui_hud h;
@@ -3092,11 +3205,17 @@ static void run_game(void)
       h.fps = 60;
       h.pictures = 60;
       if (guide_shown)
+      {
+         guide_invalidate();
          guide_draw();
+      }
       else
          scr_hud(&h);
       ui_present();
    }
+   hud_have = false;
+   bottom_asleep = false;
+   bottom_idle_t0 = svcGetSystemTick();
    stereo_apply();
    if (GPU_ACTIVE && video_thread_enabled)
       gpu_guard_set("the first frames of a game");
@@ -3114,7 +3233,20 @@ static void run_game(void)
       keys_held = hidKeysHeld();
       gyro_update();
       open_menu = (hidKeysDown() & KEY_TOUCH) != 0;
-      if (guide_shown)
+      if (keys_held & KEY_TOUCH)
+      {
+         if (bottom_asleep)
+         {
+            bottom_wake();
+            eat_touch = true;   /* the tap only wakes the bottom screen */
+         }
+         bottom_idle_t0 = svcGetSystemTick();
+      }
+      else
+         eat_touch = false;
+      if (eat_touch)
+         open_menu = false;
+      else if (guide_shown)
       {
          /* the guide takes the touches: drag to scroll, Menu opens the menu */
          touchPosition tp;
@@ -3131,6 +3263,8 @@ static void run_game(void)
          }
          else if (hidKeysUp() & KEY_TOUCH)
             r = guide_touch(GUIDE_TOUCH_UP, 0, 0);
+         else
+            r = guide_tick();   /* a flick keeps scrolling for a moment */
          open_menu = r == GUIDE_MENU;
          if (r == GUIDE_REDRAW)
             guide_dirty = true;
@@ -3141,7 +3275,9 @@ static void run_game(void)
          guide_save_pos();
          if (!game_menu())
             return;
+         guide_invalidate();   /* the menu drew over the canvas */
          guide_dirty = guide_shown;
+         bottom_idle_t0 = svcGetSystemTick();
          clear_top();
          skip_phase = 0;
          t_frame0 = t_win0 = svcGetSystemTick();
@@ -3263,6 +3399,8 @@ static void run_game(void)
       if (frames_total == 180)
          gpu_guard_clear();   /* 3 seconds of frames: the GPU display works */
 
+      bottom_check_idle();
+
       if (guide_dirty)
       {
          guide_draw();
@@ -3316,11 +3454,9 @@ static void run_game(void)
             h.stat_label[5] = "Emulator";
             snprintf(h.stat_value[5], 40, "%.38s", core_msg);
             h.nstats = core_msg[0] ? 6 : 5;
-            if (!guide_shown)
-            {
-               scr_hud(&h);
-               ui_present();
-            }
+            hud_last = h;
+            hud_have = true;
+            hud_show();
          }
          prev_underruns = audio_underruns;
          prev_drops     = audio_drops;
@@ -3389,6 +3525,7 @@ int main(int argc, char **argv)
    bool dynarec;
 
    gfxInit(GSP_RGB565_OES, GSP_RGB565_OES, false);
+   lcd_ok = R_SUCCEEDED(gspLcdInit());
    gfxSetDoubleBuffering(GFX_TOP, true);
    gfxSetDoubleBuffering(GFX_BOTTOM, true);
    osSetSpeedupEnable(true);
@@ -3516,6 +3653,11 @@ int main(int argc, char **argv)
    if (audio_ok)
       ndspExit();
    gpu_guard_set("closing: releasing the screens");
+   if (lcd_ok)
+   {
+      GSPLCD_PowerOnBacklight(GSPLCD_SCREEN_BOTTOM);
+      gspLcdExit();
+   }
    gfxExit();
    gpu_guard_clear();
    return 0;
