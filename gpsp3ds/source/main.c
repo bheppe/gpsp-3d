@@ -2117,9 +2117,21 @@ static void make_paths(void)
  * memory, the "y" entry is the rotation in the screen's plane). */
 extern int gpsp_gyro_z;
 int gpsp_gyro_present(void);
+/* tilt sensor carts (Yoshi Topsy-Turvy, Koro Koro Puzzle): the 3DS
+ * accelerometer, scaled like mGBA's 3DS port */
+extern int gpsp_tilt_x, gpsp_tilt_y;
+int gpsp_tilt_present(void);
+static bool tilt_on;
 static bool gyro_on;
 static void gyro_update(void)
 {
+   if (tilt_on)
+   {
+      /* read straight from shared memory, like the gyro below (and mGBA) */
+      accelVector a = *(const accelVector*)(uintptr_t)&hidSharedMem[0x48];
+      gpsp_tilt_x = a.x >> 3;
+      gpsp_tilt_y = a.y >> 3;
+   }
    if (!gyro_on)
       return;
    {
@@ -2164,6 +2176,8 @@ static bool game_load(void)
    game_loaded = true;
    gpsp_gyro_z = 0;
    gyro_on = gpsp_gyro_present() && R_SUCCEEDED(HIDUSER_EnableGyroscope());
+   gpsp_tilt_x = gpsp_tilt_y = 0;
+   tilt_on = gpsp_tilt_present() && R_SUCCEEDED(HIDUSER_EnableAccelerometer());
    sram_load();
    profile_load_fwd();
    guide_open(rom_path, rom_name, APP_DIR);
@@ -2184,6 +2198,11 @@ static void game_unload(void)
    {
       HIDUSER_DisableGyroscope();
       gyro_on = false;
+   }
+   if (tilt_on)
+   {
+      HIDUSER_DisableAccelerometer();
+      tilt_on = false;
    }
    profile_leave_fwd();
 }

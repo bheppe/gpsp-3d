@@ -449,9 +449,60 @@ void reload_timing_info()
   }
 }
 
+/* Tilt sensor (Yoshi Topsy-Turvy, Koro Koro Puzzle Happy Panechu): an
+ * accelerometer in the SRAM area at 0x0E008000-0x0E0085FF, same protocol as
+ * mGBA: write 0x55 to 0x8000 and then 0xAA to 0x8100 to take a sample; X is
+ * read at 0x8200 (low 8 bits) and 0x8300 (high 4 bits, bit 7 = ready), Y at
+ * 0x8400 / 0x8500. Level is about 0x3A0. The frontend sets gpsp_tilt_x/y
+ * (signed, 0 = level). */
+static bool tilt_enabled = false;
+static int tilt_state;
+static u16 tilt_x = 0x3A0, tilt_y = 0x3A0;
+int gpsp_tilt_x = 0, gpsp_tilt_y = 0;
+int gpsp_tilt_present(void) { return tilt_enabled; }
+
+static u16 tilt_value(int v)
+{
+  v += 0x3A0;
+  return (u16)(v < 0 ? 0 : v > 0xFFF ? 0xFFF : v);
+}
+
+static bool tilt_read(u32 address, u8 *value)
+{
+  if (!tilt_enabled || address < 0x8000 || address >= 0x8600)
+    return false;
+  switch (address & 0xFF00)
+  {
+    case 0x8200: *value = tilt_x & 0xFF; break;
+    case 0x8300: *value = ((tilt_x >> 8) & 0xF) | 0x80; break;
+    case 0x8400: *value = tilt_y & 0xFF; break;
+    case 0x8500: *value = (tilt_y >> 8) & 0xF; break;
+    default:     *value = 0; break;
+  }
+  return true;
+}
+
+static bool tilt_write(u32 address, u8 value)
+{
+  if (!tilt_enabled || address < 0x8000 || address >= 0x8600)
+    return false;
+  if ((address & 0xFF00) == 0x8000)
+    tilt_state = value == 0x55;
+  else if ((address & 0xFF00) == 0x8100 && value == 0xAA && tilt_state)
+  {
+    tilt_x = tilt_value(gpsp_tilt_x);
+    tilt_y = tilt_value(gpsp_tilt_y);
+    tilt_state = 0;
+  }
+  return true;
+}
+
 u8 read_backup(u32 address)
 {
   u8 value = 0;
+
+  if (tilt_read(address, &value))
+    return value;
 
   if(backup_type == BACKUP_EEPROM)
   {
@@ -1309,6 +1360,9 @@ cpu_alert_type function_cc write_io_register32(u32 address, u32 value)
 void function_cc write_backup(u32 address, u32 value)
 {
   value &= 0xFF;
+
+  if (tilt_write(address, (u8)value))
+    return;
 
   if(backup_type == BACKUP_EEPROM)
   {
@@ -3272,12 +3326,19 @@ u32 load_gamepak(const struct retro_game_info* info, const char *name,
    gyro_enabled = false;
    gyro_edge = false;
    gyro_sample = 0;
+   tilt_enabled = false;
+   tilt_state = 0;
+   tilt_x = tilt_y = 0x3A0;
    backup_type_reset = BACKUP_UNKN;
    backup_type_eeprom_guessed = 0;
    eeprom_really_used = 0;
    serial_mode = force_serial;
 
    load_game_config_over(game_code);
+   /* tilt sensor carts: Yoshi Topsy-Turvy / Yoshi no Banyuu Inryoku (KYG*),
+      Koro Koro Puzzle Happy Panechu! (KHP*) */
+   if (!strncmp(game_code, "KYG", 3) || !strncmp(game_code, "KHP", 3))
+     tilt_enabled = true;
 
    if (backup_type_reset == BACKUP_UNKN)
    {
