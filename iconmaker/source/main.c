@@ -404,19 +404,19 @@ static int rgba_text(u8 *img, int w, int h, const ui_font *f, int x, int y, cons
    return x_end;
 }
 
-/* the game's name on the generated banner, right of the icon: up to three
- * lines of Inter, then the emulator's name */
-static void banner_name(const char *title, int sys, u8 *banner, int maxw)
+/* the game's name word-wrapped into at most rows lines of font f, each at
+ * most maxw wide (" - " starts a new line, "..." where it's cut). Returns the
+ * number of lines. */
+static int wrap_name(const char *title, int sys, const ui_font *f, int maxw, char lines[][64], int rows)
 {
-   const ui_font *f = &ui_font_bold;
-   char clean[128], lines[3][64];
+   char clean[128];
    const char *s;
-   int nl = 0, i, y;
+   int nl = 0;
 
    clean_name(title, clean, sizeof(clean));
-   memset(lines, 0, sizeof(lines));
+   memset(lines, 0, rows * 64);
    s = clean;
-   while (*s && nl < 3)
+   while (*s && nl < rows)
    {
       char line[64] = "";
       while (*s == ' ') s++;
@@ -450,7 +450,7 @@ static void banner_name(const char *title, int sys, u8 *banner, int maxw)
          size_t n = strlen(line);
          line[n - 4] = '.'; line[n - 3] = '.'; line[n - 2] = '.'; line[n - 1] = 0;
       }
-      if (nl == 2 && *s)                     /* more left over: "..." */
+      if (nl == rows - 1 && *s)                     /* more left over: "..." */
       {
          size_t n = strlen(line);
          while (n > 4 && ui_text_w(f, line) + ui_text_w(f, "...") > maxw)
@@ -462,10 +462,48 @@ static void banner_name(const char *title, int sys, u8 *banner, int maxw)
    if (!nl)
       snprintf(lines[nl++], sizeof(lines[0]), "%s game", systems[sys].console);
 
+   return nl;
+}
+
+/* the game's name on the generated banner, right of the icon: up to three
+ * lines of Inter, then the emulator's name */
+static void banner_name(const char *title, int sys, u8 *banner, int maxw)
+{
+   char lines[3][64];
+   int nl = wrap_name(title, sys, &ui_font_bold, maxw, lines, 3), i, y;
+
    y = (128 - (nl * 20 + 22)) / 2;
    for (i = 0; i < nl; i++)
-      rgba_text(banner, 256, 128, f, 120, y + i * 20, lines[i], 0xFFFFFF);
+      rgba_text(banner, 256, 128, &ui_font_bold, 120, y + i * 20, lines[i], 0xFFFFFF);
    rgba_text(banner, 256, 128, &ui_font_small, 121, y + nl * 20 + 6, systems[sys].name, systems[sys].tag_rgb);
+}
+
+/* text centred at y with a dark outline, so it reads on any HOME Menu theme */
+static void outlined_text(u8 *img, int w, int h, const ui_font *f, int y, const char *s, u32 rgb)
+{
+   static const signed char d[8][2] = { {-1,-1}, {0,-1}, {1,-1}, {-1,0}, {1,0}, {-1,1}, {0,1}, {1,1} };
+   int i, x = (w - ui_text_w(f, s)) / 2;
+   for (i = 0; i < 8; i++)
+      rgba_text(img, w, h, f, x + d[i][0] * 2, y + d[i][1] * 2, s, 0x0A0A1E);
+   rgba_text(img, w, h, f, x, y, s, rgb);
+}
+
+/* the 3D banner's name strip (256x64, transparent): the name on one or two
+ * lines, then the system and emulator if there's room */
+static void name_strip(const char *title, int sys, u8 *strip)
+{
+   char lines[2][64], tag[64];
+   int nl = wrap_name(title, sys, &ui_font_bold, 240, lines, 2), i, y;
+
+   memset(strip, 0, 256 * 64 * 4);
+   y = nl == 1 ? 10 : 4;
+   for (i = 0; i < nl; i++)
+      outlined_text(strip, 256, 64, &ui_font_bold, y + i * 22, lines[i], 0xFFFFFF);
+   if (nl == 1)
+   {
+      snprintf(tag, sizeof(tag), "%s  -  %s", systems[sys].console, systems[sys].name);
+      outlined_text(strip, 256, 64, &ui_font_small, 38, tag, systems[sys].tag_rgb);
+   }
 }
 
 /* ------------------------------------------------------------------ */
@@ -476,7 +514,7 @@ typedef struct
 {
    u8 icon48[48 * 48 * 4];
    u8 banner[256 * 128 * 4];     /* what the top screen previews (flat) */
-   u8 back[256 * 128 * 4];       /* 3D: the backdrop, without the icon */
+   u8 name[256 * 64 * 4];        /* 3D: the name strip under the tile */
    u8 label[128 * 128 * 4];      /* 3D: the icon, on the tile */
    char title[64];
    int sys;
@@ -512,13 +550,7 @@ static void make_art(const char *path, int sys, game_art *a)
    }
    if (banner_style == STYLE_3D)
    {
-      if (banner_png)
-         banner_from_image(banner_png, bw, bh, a->back);
-      else
-      {
-         default_banner(a->title, NULL, 0, 0, a->back, BANNER_NO_ICON);
-         banner_name(a->title, sys, a->back, 232 - 120);   /* the 3D view shows x 21..235 */
-      }
+      name_strip(a->title, sys, a->name);
       image_fit(icon_png ? icon_png : a->icon48, iw, ih, a->label, 128, 128);
       {
          /* see-through parts take the tile's grey (make_banner3d.py's Body) */
@@ -581,7 +613,7 @@ static int make_icon(const char *path, int sys, char *err, int errlen)
    p.launch = systems[sys].launch;
    p.path = path;
    p.smdh = smdh;
-   p.banner = three_d ? art.back : art.banner;
+   p.banner = three_d ? art.name : art.banner;
    p.label = three_d ? art.label : NULL;
    if (fwdcia_make(cia, size, &p, sha256_3ds, err, errlen))
    {
@@ -872,7 +904,7 @@ static void draw_top_game(const game_art *a, bool installed)
    ui_text(&ui_font_bold, 96, 164, a->title, C_TEXT, UI_W - 110);
    ui_text(&ui_font_small, 96, 186, a->has_icon_png ? "Icon: its PNG" : "Icon: made from the name", C_DIM, 0);
    ui_text(&ui_font_small, 96, 201, a->has_banner_png ? "Banner: its .banner.png"
-           : banner_style == STYLE_3D ? "Banner: 3D, the icon pops out (SELECT)"
+           : banner_style == STYLE_3D ? "Banner: 3D, the icon turns (SELECT)"
            : banner_style == STYLE_CLEAR ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)",
            C_DIM, 0);
    {

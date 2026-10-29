@@ -10,9 +10,9 @@
  * CGFX, LZ11).
  *
  * The 3D template (tools/make_banner3d.py, through pycgfx) has two RGBA4
- * textures: the 256x128 backdrop and a 128x128 label on the tile that comes
- * out of the screen. pycgfx stores rows bottom first, so those are written
- * flipped. */
+ * textures instead: the 128x128 icon on the turning tile, and the 256x64
+ * name strip under it. pycgfx stores rows bottom first, so those are
+ * written flipped. */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -289,14 +289,14 @@ int banner_set_images(uint8_t *cbmd, uint32_t size, const uint8_t *rgba256x128,
       goto out;
    }
 
-   txob = find_txob(cgfx, glen, 256, 128);
    label = find_txob(cgfx, glen, 128, 128);    /* only in the 3D template */
+   txob = label ? find_txob(cgfx, glen, 256, 64) : find_txob(cgfx, glen, 256, 128);
    if (!txob)
    {
-      fail(err, errlen, "no 256x128 texture");
+      fail(err, errlen, "no banner texture");
       goto out;
    }
-   if (put_texture(cgfx, glen, txob, 256, 128, rgba256x128, label != 0) ||
+   if (put_texture(cgfx, glen, txob, 256, label ? 64 : 128, rgba256x128, label != 0) ||
        (label && label128 && put_texture(cgfx, glen, label, 128, 128, label128, 1)))
    {
       fail(err, errlen, "bad texture offset");

@@ -30,7 +30,8 @@ typedef struct
    const char *launch;     /* file that emulator reads the game path from ("" : gpSP 3D's) */
    const char *path;       /* the game, e.g. "sdmc:/roms/gba/Golf.gba" */
    const uint8_t *smdh;    /* FWDCIA_SMDH_SIZE bytes, or NULL to keep the template's */
-   const uint8_t *banner;  /* 256x128 RGBA top-screen picture, or NULL to keep the template's */
+   const uint8_t *banner;  /* 256x128 RGBA top-screen picture (3D template: the 256x64 name strip),
+                              or NULL to keep the template's */
    const uint8_t *label;   /* 3D template only: 128x128 RGBA on the tile, or NULL */
 } fwdcia_params;
 

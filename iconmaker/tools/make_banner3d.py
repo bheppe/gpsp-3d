@@ -1,34 +1,37 @@
 #!/usr/bin/env python3
-"""Makes Icon Maker's 3D banner template, res/banner3d.cgfx, and its jingle,
-res/jingle.wav.
+"""Makes Icon Maker's 3D banner template, res/banner3d.cgfx (and a version
+without animation, banner3d-still.cgfx), its jingle, res/jingle.wav, and the
+3D banners of the apps themselves.
 
-The banner is a model the HOME Menu draws in 3D: a tile with the game's icon
-on its face floats out of the screen in front of a flat backdrop that carries
-the game's name, and sways gently (the HOME Menu loops a banner's
-animation). Icon Maker swaps in the two pictures for each game:
-  BACK   256x128 RGBA4  the backdrop: the name, and the background (or none)
-  LABEL  128x128 RGBA4  the tile's face: the game's icon
+The HOME Menu turns a 3D banner's whole model about the vertical axis. The
+model is a tile with the game's icon on both faces, bobbing a little, and
+under it the game's name on a strip that always faces the camera. Icon Maker
+swaps in two pictures for each game:
+  LABEL  128x128 RGBA4  both faces of the tile: the game's icon
+  NAME   256x64  RGBA4  the name strip (transparent around the text)
 Both start as noise, so the compressed model always has room for any picture.
 
   python3 tools/make_banner3d.py --jingle          only res/jingle.wav
-  python3 tools/make_banner3d.py /path/to/pycgfx   both, then the 3D banners of
-      gpSP 3D, Icon Maker and (if it's next to this repo, as snes9x_3ds-pr2)
-      Snes9x 3D from their banner3d-back.png / banner3d-label.png
+  python3 tools/make_banner3d.py /path/to/pycgfx   the models, then the 3D
+      banners of gpSP 3D, Icon Maker and (if it's next to this repo, as
+      snes9x_3ds-pr2) Snes9x 3D, from their banner3d-name.png (256x64) and
+      banner3d-label.png (128x128)
 
 The model needs pycgfx (https://github.com/skyfloogle/pycgfx, glTF to CGFX),
 gltflib and Pillow. The camera matches pycgfx's banner-camera.gltf: at
-(0, 1, 44.786) with a 30 degree vertical field of view, so the plane z = 0
-shows x -20..20, y -11..13.
+(0, 1, 44.786) with a 30 degree vertical field of view.
 """
 import base64, io, json, math, os, random, struct, sys, tempfile, wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "..", "res")
 
-# ---- layout (like the flat banner: icon left, name right) ----
-TILE_X, TILE_Y, TILE_Z = -11.0, 1.0, 4.0   # centre of the tile; z > 0 comes out of the screen
-TILE_W, TILE_D = 12.0, 1.6                 # square face, depth
-SECONDS = 4.0                              # one sway, looped
+# ---- layout (the HOME Menu shows about y -8..9; it turns the model about x = 0) ----
+TILE_W, TILE_D = 11.0, 1.4                 # the tile: square face, depth
+TILE_Y = 3.0                               # its centre
+NAME_W, NAME_Y = 18.0, -8.0                # the name strip: width, bottom edge (height = width / 4)
+BOB = 0.4                                  # how far the tile bobs
+SECONDS = 4.0                              # one bob, looped
 
 
 def noise_png(w, h):
@@ -102,62 +105,74 @@ class Builder:
 
 
 def make_gltf(animated=True):
+    """The HOME Menu turns a 3D banner's whole model about the vertical axis
+    (and shows roughly y -8..9 of it). So: a tile with the game's icon on both
+    faces, centred on that axis, bobbing a little; and under it the name, on a
+    strip that always faces the camera (a Y-axis billboard, set after
+    conversion), so it stays readable while the tile turns."""
     b = Builder()
-    # the backdrop: 48 x 24 at z = 0, a little wider than the view (40 x 24)
-    back = b.prim([([(-24, -11, 0), (24, -11, 0), (24, 13, 0), (-24, 13, 0)], (0, 0, 1),
-                    [(0, 1), (1, 1), (1, 0), (0, 0)])], 0)
-    front, others = box(TILE_W, TILE_W, TILE_D)
-    face = b.prim([front], 1)
-    sides = b.prim(others, 2)          # textured too: a material without one crashes the HOME Menu
+    x, y, z = TILE_W / 2, TILE_W / 2, TILE_D / 2
+    front = ([(-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)], (0, 0, 1), [(0, 1), (1, 1), (1, 0), (0, 0)])
+    rear = ([(x, -y, -z), (-x, -y, -z), (-x, y, -z), (x, y, -z)], (0, 0, -1), [(0, 1), (1, 1), (1, 0), (0, 0)])
+    sides = [
+        ([(x, -y, z), (x, -y, -z), (x, y, -z), (x, y, z)], (1, 0, 0)),
+        ([(-x, -y, -z), (-x, -y, z), (-x, y, z), (-x, y, -z)], (-1, 0, 0)),
+        ([(-x, y, z), (x, y, z), (x, y, -z), (-x, y, -z)], (0, 1, 0)),
+        ([(-x, -y, -z), (x, -y, -z), (x, -y, z), (-x, -y, z)], (0, -1, 0)),
+    ]
+    faces = b.prim([front, rear], 0)
+    body = b.prim(sides, 1)            # textured too: a material without one crashes the HOME Menu
+    # the name strip: 4:1 like its 256x64 picture, its place baked into the vertices
+    nx0, nx1, ny0, ny1 = -NAME_W / 2, NAME_W / 2, NAME_Y, NAME_Y + NAME_W / 4
+    name = b.prim([([(nx0, ny0, 0), (nx1, ny0, 0), (nx1, ny1, 0), (nx0, ny1, 0)], (0, 0, 1),
+                    [(0, 1), (1, 1), (1, 0), (0, 0)])], 2)
 
-    # the sway: a little turn and float, looped
+    # the bob: up and down, looped; every channel of the transform given
+    # (rotation and scale held), like Blender's exports that work on hardware
     n = 33
     times = [SECONDS * i / (n - 1) for i in range(n)]
-    rots, trans = [], []
-    for t in times:
-        a = 2 * math.pi * t / SECONDS
-        ry, rx = math.radians(16) * math.sin(a), math.radians(5) * math.sin(2 * a)
-        cy, sy, cx, sx = math.cos(ry / 2), math.sin(ry / 2), math.cos(rx / 2), math.sin(rx / 2)
-        rots.append((cy * sx, sy * cx, -sy * sx, cy * cx))      # turn about x, then y
-        trans.append((TILE_X, TILE_Y + 0.5 * math.sin(2 * a), TILE_Z + 0.5 * math.cos(a)))
+    trans = [(0.0, TILE_Y + BOB * math.sin(2 * math.pi * t / SECONDS), 0.0) for t in times]
     t_acc = b.add(b"".join(struct.pack("<f", t) for t in times), 5126, "SCALAR", n, None, ([0.0], [SECONDS]))
-    r_acc = b.add(b"".join(struct.pack("<4f", *q) for q in rots), 5126, "VEC4", n)
     p_acc = b.add(b"".join(struct.pack("<3f", *v) for v in trans), 5126, "VEC3", n)
+    r_acc = b.add(struct.pack("<4f", 0, 0, 0, 1) * n, 5126, "VEC4", n)
+    s_acc = b.add(struct.pack("<3f", 1, 1, 1) * n, 5126, "VEC3", n)
 
-    images = [("BACK", noise_png(256, 128)), ("LABEL", noise_png(128, 128)), ("BODY", solid_png(8, 8, (74, 79, 90)))]
-    return {
+    images = [("LABEL", noise_png(128, 128)), ("BODY", solid_png(8, 8, (74, 79, 90))),
+              ("NAME", noise_png(256, 64))]
+    gltf = {
         "asset": {"version": "2.0", "generator": "gpSP 3D make_banner3d.py"},
         "scene": 0,
         "scenes": [{"nodes": [0, 1]}],
         "nodes": [
-            {"name": "Backdrop", "mesh": 0},
-            {"name": "Tile", "mesh": 1, "translation": list(trans[0]), "rotation": list(rots[0])},
+            {"name": "Tile", "mesh": 0, "translation": [0, TILE_Y, 0]},
+            {"name": "Name", "mesh": 1},
         ],
-        "meshes": [{"name": "Backdrop", "primitives": [back]},
-                   {"name": "Tile", "primitives": [face, sides]}],
+        "meshes": [{"name": "Tile", "primitives": [faces, body]},
+                   {"name": "Name", "primitives": [name]}],
         "materials": [
-            {"name": "Back",
-             "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "roughnessFactor": 1,
-                                      "metallicFactor": 0}},
-            {"name": "Label", "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}, "roughnessFactor": 0.6,
-                                                       "metallicFactor": 0}},
-            {"name": "Body", "pbrMetallicRoughness": {"baseColorTexture": {"index": 2}, "roughnessFactor": 0.5,
-                                                      "metallicFactor": 0}},
+            {"name": "Label", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0}},
+            {"name": "Body", "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}, "metallicFactor": 0}},
+            {"name": "NameText", "alphaMode": "MASK", "alphaCutoff": 0.5, "doubleSided": True,
+             "pbrMetallicRoughness": {"baseColorTexture": {"index": 2}, "metallicFactor": 0}},
         ],
-        "textures": [{"source": 0, "sampler": 0}, {"source": 1, "sampler": 0}, {"source": 2, "sampler": 0}],
+        "textures": [{"source": i, "sampler": 0} for i in range(3)],
         "samplers": [{"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071}],
         "images": [{"name": nm, "mimeType": "image/png",
                     "uri": "data:image/png;base64," + base64.b64encode(png).decode()} for nm, png in images],
-        "animations": [] if not animated else [{"name": "Sway", "samplers": [
-            {"input": t_acc, "output": r_acc, "interpolation": "LINEAR"},
-            {"input": t_acc, "output": p_acc, "interpolation": "LINEAR"}],
-            "channels": [{"sampler": 0, "target": {"node": 1, "path": "rotation"}},
-                         {"sampler": 1, "target": {"node": 1, "path": "translation"}}]}],
         "buffers": [{"byteLength": len(b.buf),
                      "uri": "data:application/octet-stream;base64," + base64.b64encode(bytes(b.buf)).decode()}],
         "bufferViews": b.views,
         "accessors": b.accessors,
     }
+    if animated:
+        gltf["animations"] = [{"name": "Bob", "samplers": [
+            {"input": t_acc, "output": p_acc, "interpolation": "LINEAR"},
+            {"input": t_acc, "output": r_acc, "interpolation": "LINEAR"},
+            {"input": t_acc, "output": s_acc, "interpolation": "LINEAR"}],
+            "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}},
+                         {"sampler": 1, "target": {"node": 0, "path": "rotation"}},
+                         {"sampler": 2, "target": {"node": 0, "path": "scale"}}]}]
+    return gltf
 
 
 def make_jingle(path):
@@ -216,6 +231,8 @@ def hardware_fixes(cgfx):
             for st in (attr.vertex_streams.data.contents if hasattr(attr, "vertex_streams") else (attr,)):
                 if st.usage in (VertexAttributeUsage.BoneIndex, VertexAttributeUsage.BoneWeight):
                     sys.exit(shape.name + " has bone weights")
+    from cgfx.sobj import BillboardMode
+    model.skeleton.bones["Name"].billboard_mode = BillboardMode.YAxial
     for name in model.materials:
         m = model.materials[name]
         m.material_color.constant[0] = ColorFloat(0, 0, 0, 1)
@@ -288,10 +305,10 @@ def _cwav_of(bnr):
     return d[struct.unpack_from("<I", d, 0x84)[0]:]
 
 
-def app_banner(model, back, label, cwav, out):
+def app_banner(model, name, label, cwav, out):
     with open(model, "rb") as f:
         cgfx = bytearray(f.read())
-    _put_texture(cgfx, 256, 128, back)
+    _put_texture(cgfx, 256, 64, name)
     _put_texture(cgfx, 128, 128, label)
     packed = _lz11_stored(bytes(cgfx))
     cwav_off = (0x88 + len(packed) + 0x1F) & ~0x1F
@@ -310,14 +327,14 @@ def make_app_banners():
     with open(os.path.join(RES, "jingle.bcwav"), "rb") as f:
         jingle = f.read()
     gp = os.path.join(root, "gpsp3ds", "res")
-    app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(gp, "banner3d-back.png"),
+    app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(gp, "banner3d-name.png"),
                os.path.join(gp, "banner3d-label.png"), jingle, os.path.join(gp, "banner3d.bnr"))
     # Icon Maker: the still model for now, to tell an animation problem apart
-    app_banner(os.path.join(RES, "banner3d-still.cgfx"), os.path.join(RES, "banner3d-back.png"),
+    app_banner(os.path.join(RES, "banner3d-still.cgfx"), os.path.join(RES, "banner3d-name.png"),
                os.path.join(RES, "banner3d-label.png"), jingle, os.path.join(RES, "banner3d-app.bnr"))
     snes = os.path.join(root, "..", "snes9x_3ds-pr2", "resources")
-    if os.path.isfile(os.path.join(snes, "banner3d-back.png")):
-        app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(snes, "banner3d-back.png"),
+    if os.path.isfile(os.path.join(snes, "banner3d-name.png")):
+        app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(snes, "banner3d-name.png"),
                    os.path.join(snes, "banner3d-label.png"), _cwav_of(os.path.join(snes, "banner.bnr")),
                    os.path.join(snes, "banner.bnr"))
 
