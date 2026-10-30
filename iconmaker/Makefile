@@ -24,6 +24,10 @@ ICON            := res/icon.png
 
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS   := -g -Wall -O2 -mword-relocations -ffunction-sections $(ARCH) $(INCLUDE) -D__3DS__
+# make TIMING=1: a build that shows how long each step of the preview takes
+ifneq ($(TIMING),)
+CFLAGS   += -DICONMAKER_TIMING
+endif
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 LIBS     := -lctru -lm

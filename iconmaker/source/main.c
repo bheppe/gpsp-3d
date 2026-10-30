@@ -26,6 +26,7 @@
 #include <strings.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <time.h>
 #include "fwdcia.h"
 #include "deficon.h"
 #include "ui.h"
@@ -87,6 +88,84 @@ static int nentries, ngames;
 static icon_entry icons[MAX_ICONS];
 static int nicons;
 static char cwd[512] = "sdmc:/";
+
+/* ------------------------------------------------------------------ */
+/* timing (make TIMING=1): how long each step of the preview takes,    */
+/* shown on the top screen and added to iconmaker_timing.log           */
+/* ------------------------------------------------------------------ */
+
+#ifdef ICONMAKER_TIMING
+#define TIMING_LOG "sdmc:/3ds/gpsp3d/iconmaker_timing.log"
+#define TM_MAX 20
+static struct { const char *what; u32 us; int n; } tm[TM_MAX];
+static int ntm;
+static u64 tm_t0;
+static char tm_pic[2][64];          /* the icon's and banner's file: size, bytes */
+static u32 tm_dir_us, tm_dir_n, tm_bottom_us;
+
+static u32 tm_us(u64 ticks)
+{
+   return (u32)(ticks / (SYSCLOCK_ARM11 / 1000000));
+}
+
+static void tm_start(void)
+{
+   ntm = 0;
+   tm_pic[0][0] = tm_pic[1][0] = 0;
+   tm_t0 = svcGetSystemTick();
+}
+
+/* the time since the last mark goes to this step (added up if it repeats) */
+static void tm_mark(const char *what)
+{
+   u32 us = tm_us(svcGetSystemTick() - tm_t0);
+   int i;
+   for (i = 0; i < ntm && tm[i].what != what; i++)
+      ;
+   if (i < TM_MAX)
+   {
+      if (i == ntm)
+      {
+         tm[ntm].what = what;
+         tm[ntm].us = tm[ntm].n = 0;
+         ntm++;
+      }
+      tm[i].us += us;
+      tm[i].n++;
+   }
+   tm_t0 = svcGetSystemTick();
+}
+
+static void tm_log(const char *line);
+
+/* a session's first lines: when, and on which console */
+static void tm_log_start(void)
+{
+   char line[160];
+   time_t now = time(NULL);
+   bool n3ds = false;
+   APT_CheckNew3DS(&n3ds);
+   strftime(line, 40, "\n=== %Y-%m-%d %H:%M:%S", localtime(&now));
+   snprintf(line + strlen(line), sizeof(line) - strlen(line),
+            "  Icon Maker " ICONMAKER_VERSION ", %s\n", n3ds ? "New 3DS" : "Old 3DS");
+   tm_log(line);
+}
+
+static void tm_log(const char *line)
+{
+   FILE *f;
+   mkdir("sdmc:/3ds", 0777);
+   mkdir("sdmc:/3ds/gpsp3d", 0777);
+   if ((f = fopen(TIMING_LOG, "a")))
+   {
+      fputs(line, f);
+      fclose(f);
+   }
+}
+#else
+#define tm_start()  ((void)0)
+#define tm_mark(w)  ((void)0)
+#endif
 
 /* ------------------------------------------------------------------ */
 /* theme (gpSP 3D's)                                                   */
@@ -295,6 +374,9 @@ static int cmp_entry(const void *a, const void *b)
 
 static void read_dir(void)
 {
+#ifdef ICONMAKER_TIMING
+   u64 t_dir = svcGetSystemTick();
+#endif
    DIR *d = opendir(cwd);
    struct dirent *e;
    nentries = ngames = 0;
@@ -330,6 +412,16 @@ static void read_dir(void)
    closedir(d);
    qsort(entries + (strcmp(cwd, "sdmc:/") ? 1 : 0),
          nentries - (strcmp(cwd, "sdmc:/") ? 1 : 0), sizeof(entry), cmp_entry);
+#ifdef ICONMAKER_TIMING
+   {
+      char line[700];
+      tm_dir_us = tm_us(svcGetSystemTick() - t_dir);
+      tm_dir_n = nentries;
+      snprintf(line, sizeof(line), "folder %s: %d entries, %d games, read in %.1f ms\n",
+               cwd, nentries, ngames, tm_dir_us / 1000.0);
+      tm_log(line);
+   }
+#endif
 }
 
 static void enter(const char *name)
@@ -369,11 +461,35 @@ static u8 *load_picture(const char *game, const char *ext, int *w, int *h)
    char file[600];
    const char *dot = strrchr(game, '.');
    int n, i;
+   bool banner = ext[0] != 0;
    for (i = 0; i < 3; i++)
    {
       u8 *img;
+      FILE *f;
       snprintf(file, sizeof(file), "%.*s%s.%s", (int)(dot - game), game, ext, types[i]);
-      if ((img = stbi_load(file, w, h, &n, 4)))
+      if (!(f = fopen(file, "rb")))
+      {
+         tm_mark(banner ? "banner: look for files" : "icon: look for files");
+         continue;
+      }
+      img = stbi_load_from_file(f, w, h, &n, 4);
+      tm_mark(banner ? "banner: read + decode" : "icon: read + decode");
+#ifdef ICONMAKER_TIMING
+      {
+         /* the file read again on its own: how much of that is the SD card */
+         static u8 buf[32768];
+         long bytes = 0;
+         size_t got;
+         fseek(f, 0, SEEK_SET);
+         while ((got = fread(buf, 1, sizeof(buf), f)) > 0)
+            bytes += got;
+         tm_mark(banner ? "banner: just reading (32K)" : "icon: just reading (32K)");
+         snprintf(tm_pic[banner], sizeof(tm_pic[0]), "%s %dx%d, %ld KB",
+                  types[i], img ? *w : 0, img ? *h : 0, bytes / 1024);
+      }
+#endif
+      fclose(f);
+      if (img)
          return img;
    }
    return NULL;
@@ -570,9 +686,11 @@ static void make_art(const char *path, int sys, game_art *a)
       fit_picture(icon_png, iw, ih, a->icon48, 48, 48);
    else
       default_icon_style(a->title, systems[sys].style, a->icon48);
+   tm_mark("icon: scale to 48x48");
    /* the icon, square and big: on the 3D tile, and on the generated banner */
    fit_picture(icon_png ? icon_png : a->icon48, icon_png ? iw : 48, icon_png ? ih : 48,
                a->label, 128, 128);
+   tm_mark("icon: scale to 128x128");
    banner_png = load_picture(path, ".banner", &bw, &bh);
    a->has_banner_png = banner_png != NULL;
    if (banner_png)
@@ -583,9 +701,11 @@ static void make_art(const char *path, int sys, game_art *a)
                      banner_style == STYLE_CLEAR ? BANNER_CLEAR : 0);
       banner_name(a->title, sys, a->banner, 256 - 120 - 8);
    }
+   tm_mark("flat banner");
    if (banner_style == STYLE_3D)
    {
       name_strip(a->title, sys, a->name);
+      tm_mark("3D: name strip");
       {
          /* see-through parts take the tile's grey (make_banner3d.py's Body);
           * outside a square with rounded corners (radius 0.2 of the width,
@@ -603,11 +723,13 @@ static void make_art(const char *path, int sys, game_art *a)
             q[3] = dx * dx + dy * dy > r * r ? 0 : 255;
          }
       }
+      tm_mark("3D: tile");
    }
    if (icon_png)
       stbi_image_free(icon_png);
    if (banner_png)
       stbi_image_free(banner_png);
+   tm_mark("free");
 }
 
 /* Make and install the icon for the game at path. Returns 0, or -1 with a
@@ -798,7 +920,11 @@ static void draw_header(void)
    ui_rrect(122, 8, 18, 15, 7, C_ORANGE);
    ui_fill(130, 11, 2, 9, C_TEXT);
    ui_fill(126, 14, 10, 2, C_TEXT);    /* a "+" badge */
+#ifdef ICONMAKER_TIMING
+   ui_text_right(&ui_font_small, UI_W - 10, 10, "TIMING BUILD   v" ICONMAKER_VERSION, C_WARN);
+#else
    ui_text_right(&ui_font_small, UI_W - 10, 10, "GBA + SNES   v" ICONMAKER_VERSION, C_DIM);
+#endif
 }
 
 static void draw_tabs(int tab)
@@ -1287,8 +1413,55 @@ static void draw_top_for(int tab, int sel, bool am)
    {
       char path[800];
       snprintf(path, sizeof(path), "%s%s", cwd, entries[sel].name);
+      tm_start();
       make_art(path, entries[sel].sys, &art);
       draw_top_game(&art, entries[sel].has_icon);
+      tm_mark("draw the top screen");
+#ifdef ICONMAKER_TIMING
+      {
+         /* the steps on a dark panel over the right of the preview */
+         char line[96], log[2000];
+         int i, y = 4, n;
+         u32 total = 0;
+         for (i = 0; i < ntm; i++)
+            total += tm[i].us;
+         ui_fill_alpha(130, 0, UI_W - 130, UI_H, C_BG, 230);
+         snprintf(line, sizeof(line), "total %.0f ms", total / 1000.0);
+         ui_text(&ui_font_bold, 136, y, line, C_WARN, 0);
+         y += 20;
+         for (i = 0; i < ntm; i++, y += 12)
+         {
+            snprintf(line, sizeof(line), "%6.1f  %s%s", tm[i].us / 1000.0, tm[i].what,
+                     tm[i].n > 1 ? " (x" : "");
+            if (tm[i].n > 1)
+               snprintf(line + strlen(line), sizeof(line) - strlen(line), "%d)", tm[i].n);
+            ui_text(&ui_font_small, 136, y, line, C_TEXT2, UI_W - 140);
+         }
+         y += 4;
+         for (i = 0; i < 2; i++)
+            if (tm_pic[i][0])
+            {
+               snprintf(line, sizeof(line), "%s: %s", i ? "banner" : "icon", tm_pic[i]);
+               ui_text(&ui_font_small, 136, y, line, C_DIM, UI_W - 140);
+               y += 12;
+            }
+         snprintf(line, sizeof(line), "folder read %.0f ms (%lu)", tm_dir_us / 1000.0,
+                  (unsigned long)tm_dir_n);
+         ui_text(&ui_font_small, 136, y, line, C_DIM, 0);
+         snprintf(line, sizeof(line), "bottom redraw %.1f ms", tm_bottom_us / 1000.0);
+         ui_text(&ui_font_small, 136, y + 12, line, C_DIM, 0);
+
+         /* the same in the log, one step a line */
+         n = snprintf(log, sizeof(log), "preview %s: %.1f ms\n", entries[sel].name, total / 1000.0);
+         for (i = 0; i < 2; i++)
+            if (tm_pic[i][0])
+               n += snprintf(log + n, sizeof(log) - n, "   %s: %s\n", i ? "banner" : "icon", tm_pic[i]);
+         for (i = 0; i < ntm && n < (int)sizeof(log) - 80; i++)
+            n += snprintf(log + n, sizeof(log) - n, "   %8.1f ms  %s%s\n", tm[i].us / 1000.0, tm[i].what,
+                          tm[i].n > 1 ? " (several times)" : "");
+         tm_log(log);
+      }
+#endif
    }
    present_top();
 }
@@ -1306,6 +1479,9 @@ int main(void)
    if (am)
       read_icons();
    load_settings();
+#ifdef ICONMAKER_TIMING
+   tm_log_start();
+#endif
    load_dir();
    read_dir();
    top_wait = 1;
@@ -1425,8 +1601,20 @@ int main(void)
 
       if (sel != old_sel || tab != old_tab || redraw || k)
       {
+#ifdef ICONMAKER_TIMING
+         u64 t_bottom = svcGetSystemTick();
+#endif
          draw_bottom(tab, sel, top);
          ui_present();
+#ifdef ICONMAKER_TIMING
+         tm_bottom_us = tm_us(svcGetSystemTick() - t_bottom);
+         if (tm_bottom_us > 16700)             /* longer than a frame */
+         {
+            char line[80];
+            snprintf(line, sizeof(line), "bottom screen redraw: %.1f ms\n", tm_bottom_us / 1000.0);
+            tm_log(line);
+         }
+#endif
          if (sel != old_sel || tab != old_tab || redraw)
             top_wait = 8;                      /* wait for the selection to settle */
          redraw = false;
