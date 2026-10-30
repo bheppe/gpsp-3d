@@ -196,10 +196,14 @@ chime. **SELECT** on the Games tab switches to a flat banner (gpSP 3D's blue, or
 no background) and back; the bottom screen shows which is on.
 
 Without any pictures, a game gets a cartridge icon with its name on the label.
-To use your own, put them next to the game: `Pokemon Emerald.png` for the icon
-(any size, best square; it's also what goes on the 3D tile) and
-`Pokemon Emerald.banner.png` for a flat banner (best 256x128). Making a game
-again replaces its icon. More in [iconmaker/README.md](iconmaker/README.md).
+To use your own, put them next to the game: `Pokemon Emerald.png` (or `.jpg`)
+for the icon (any size; it's also what goes on the 3D tile) and
+`Pokemon Emerald.banner.png` (or `.jpg`) for a flat banner (best 256x128).
+A picture of another shape, like most box art, is **padded** to fit by default;
+**X** on the Games tab switches to **cropping** it (scaled to fill, the edges
+cut off) and back. This applies to the icon, the 3D tile and the banner, and
+the choice is saved. Making a game again replaces its icon. More in
+[iconmaker/README.md](iconmaker/README.md).
 
 ### On a PC: make-forwarders.sh
 
@@ -212,11 +216,24 @@ again replaces its icon. More in [iconmaker/README.md](iconmaker/README.md).
    folder on the 3DS SD card.
 3. Install the CIAs from `gpsp3ds/out/forwarders/` with FBI.
 
-For a custom icon, put a 48x48 PNG with the game's name next to it
-(`Pokemon Emerald.gba` -> `Pokemon Emerald.png`). For a custom banner (the
-picture on the top screen when the icon is selected), add a 256x128 PNG named
-like the game plus `.banner` (`Pokemon Emerald.banner.png`), and optionally a
-short WAV for its sound (`Pokemon Emerald.banner.wav`). Other forwarder tools that
+For a custom icon, put a picture with the game's name next to it
+(`Pokemon Emerald.gba` -> `Pokemon Emerald.png`, `.jpg` or `.jpeg`). For a
+custom banner (the picture on the top screen when the icon is selected), add
+one named like the game plus `.banner` (`Pokemon Emerald.banner.png`), and
+optionally a short WAV for its sound (`Pokemon Emerald.banner.wav`).
+
+With [ImageMagick](https://imagemagick.org) installed
+(`pacman -S mingw-w64-x86_64-imagemagick` in the devkitPro shell), pictures
+can be JPEGs and any size. One of another shape than the icon (48x48) or the
+banner (256x128) is padded to fit (`--fit pad`, the default) or scaled to
+fill with the edges cut off (`--fit crop`):
+```
+bash gpsp3ds/make-forwarders.sh --fit crop /e/roms/gba /roms/gba
+```
+The bars are see-through on the banner and white on the icon (HOME Menu
+icons can't be see-through); `--pad-color black` (or `'#1e2327'`, ...) colors
+both. Transparent parts of an icon are drawn on white. Without ImageMagick,
+use PNGs of the exact size (48x48, 256x128). Other forwarder tools that
 start `gpsp3d.3dsx` with the game's path as its argument also work.
 
 ## Building

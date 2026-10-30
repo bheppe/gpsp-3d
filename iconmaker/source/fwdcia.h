@@ -60,4 +60,8 @@ void icon_scale48(const uint8_t *rgba, int w, int h, uint8_t *out48);
  * keeping its aspect ratio and centering it on transparent. */
 void image_fit(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh);
 
+/* The same, but filling ow x oh: scaled to cover it, the middle kept and
+ * what sticks out (left and right, or top and bottom) cut off. */
+void image_fill(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh);
+
 #endif

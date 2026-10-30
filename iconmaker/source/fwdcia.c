@@ -321,7 +321,8 @@ void smdh_set(uint8_t *smdh, const char *short_title, const char *long_title,
    }
 }
 
-void image_fit(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh)
+/* the w x h part of a picture `stride` pixels wide, scaled to fit ow x oh */
+static void fit_part(const uint8_t *rgba, int stride, int w, int h, uint8_t *out, int ow, int oh)
 {
    int x, y, fw, fh, ox, oy;
    memset(out, 0, ow * oh * 4);
@@ -362,7 +363,7 @@ void image_fit(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh)
                const uint8_t *px;
                if (sx >= w) sx = w - 1;
                if (sy >= h) sy = h - 1;
-               px = rgba + (sy * w + sx) * 4;
+               px = rgba + (sy * stride + sx) * 4;
                for (k = 0; k < 3; k++)
                   sum[k] += px[k] * px[3] * (wgt >> 8);
                sum[3] += px[3] * (wgt >> 8);
@@ -386,7 +387,7 @@ void image_fit(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh)
          for (sy = y0; sy < y1 && sy < h; sy++)
             for (sx = x0; sx < x1 && sx < w; sx++)
             {
-               const uint8_t *px = rgba + (sy * w + sx) * 4;
+               const uint8_t *px = rgba + (sy * stride + sx) * 4;
                /* weight colour by alpha, so transparent edges don't darken */
                sum[0] += px[0] * px[3];
                sum[1] += px[1] * px[3];
@@ -400,6 +401,24 @@ void image_fit(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh)
             o[k] = (uint8_t)(sum[3] ? sum[k] / sum[3] : 0);
          o[3] = (uint8_t)(sum[3] / cnt);
       }
+}
+
+void image_fit(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh)
+{
+   fit_part(rgba, w, w, h, out, ow, oh);
+}
+
+void image_fill(const uint8_t *rgba, int w, int h, uint8_t *out, int ow, int oh)
+{
+   /* the biggest part in the middle with the shape of ow x oh, fitted */
+   int cw = w, ch = h;
+   if ((long)w * oh > (long)h * ow)
+      cw = (int)((long)h * ow / oh);
+   else
+      ch = (int)((long)w * oh / ow);
+   if (cw < 1) cw = 1;
+   if (ch < 1) ch = 1;
+   fit_part(rgba + ((long)((h - ch) / 2) * w + (w - cw) / 2) * 4, w, cw, ch, out, ow, oh);
 }
 
 void icon_scale48(const uint8_t *rgba, int w, int h, uint8_t *out)
