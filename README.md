@@ -257,8 +257,9 @@ Icon Maker: `bash gpsp-3d/iconmaker/build-iconmaker.sh` (results in
 ### Building in a devcontainer
 
 The repo has a devcontainer with everything above already installed (devkitARM
-with `3ds-dev`, `3ds-libjpeg-turbo` and `3ds-libpng`, plus `makerom` and `bannertool` at pinned versions). Open the
-repo in VS Code with the Dev Containers extension (Docker or Podman) and choose
+with `3ds-dev`, `3ds-libjpeg-turbo` and `3ds-libpng`, plus `makerom` and
+`bannertool` at pinned versions). Open the repo in VS Code with the Dev
+Containers extension (Docker or Podman) and choose
 **Reopen in Container**, or start a GitHub Codespace. The first start builds
 the image, which takes a few minutes. Then, in the container's terminal:
 

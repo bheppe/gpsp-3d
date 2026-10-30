@@ -886,8 +886,8 @@ static void make_art(const char *path, const entry *e, game_art *a)
 
    snprintf(a->title, sizeof(a->title), "%.*s", n > 63 ? 63 : n, name);
    a->sys = sys;
-   /* the picture at 128x128 first (the 3D tile, the generated banner), then
-    * the icon from that: big pictures are scaled down only once */
+   /* the picture comes decoded small (at least 128x128): the 3D tile and the
+    * generated banner, and the icon, are made from it */
    icon_png = load_picture(path, "", e->pic[0], 128, 128, &iw, &ih, &big);
    a->has_icon_png = icon_png != NULL;
    a->icon_too_big = big;
@@ -897,7 +897,7 @@ static void make_art(const char *path, const entry *e, game_art *a)
    {
       fit_picture(icon_png, iw, ih, a->label, 128, 128);
       tm_mark("icon: scale to 128x128");
-      image_fit(a->label, 128, 128, a->icon48, 48, 48);
+      fit_picture(icon_png, iw, ih, a->icon48, 48, 48);
       stbi_image_free(icon_png);
    }
    else
@@ -959,8 +959,8 @@ static void make_art(const char *path, const entry *e, game_art *a)
 static int make_icon(const char *path, const entry *e, char *err, int errlen)
 {
    static game_art art;
-   int sys = e->sys;
    static u8 smdh[FWDCIA_SMDH_SIZE];
+   int sys = e->sys;
    char longt[160];
    const u8 *tsmdh;
    u8 *cia;
@@ -1074,12 +1074,11 @@ static void blit_565(const u16 *img, int w, int h, int x0, int y0, int scale)
       }
 }
 
-/* the canvas to the top screen (400 wide: the canvas in the middle, its
- * edge colours carried out to the sides) */
 /* what the top screen shows, so the spinner can be drawn over it */
 static u16 top_shown[UI_W * UI_H];
 
-/* the canvas to the top screen (centred on its 400 pixels) */
+/* the canvas to the top screen (400 wide: the canvas in the middle, its
+ * edge colours carried out to the sides) */
 static void present_top_canvas(void)
 {
    u16 *fb = (u16*)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
@@ -1097,6 +1096,7 @@ static void present_top_canvas(void)
    gfxScreenSwapBuffers(GFX_TOP, false);
 }
 
+/* the same, kept as what the top screen shows */
 static void present_top(void)
 {
    memcpy(top_shown, ui_canvas, sizeof(top_shown));
@@ -1773,6 +1773,71 @@ static int preview_stop(void)
    return 1;
 }
 
+#ifdef ICONMAKER_TIMING
+static u32 tm_total(void)
+{
+   u32 total = 0;
+   int i;
+   for (i = 0; i < ntm; i++)
+      if (tm[i].n > 0)                   /* not the parts measured inside a step */
+         total += tm[i].us;
+   return total;
+}
+
+/* a preview's steps on a dark panel over the right of the top screen, and
+ * in the log, one step a line */
+static void tm_report(const char *name)
+{
+   char line[96], log[2000];
+   int i, y = 4, n;
+   u32 total = tm_total();
+   ui_fill_alpha(130, 0, UI_W - 130, UI_H, C_BG, 230);
+   snprintf(line, sizeof(line), "total %.0f ms", total / 1000.0);
+   ui_text(&ui_font_bold, 136, y, line, C_WARN, 0);
+   y += 20;
+   for (i = 0; i < ntm; i++, y += 12)
+   {
+      snprintf(line, sizeof(line), "%6.1f  %s%s", tm[i].us / 1000.0, tm[i].what,
+               tm[i].n > 1 ? " (x" : "");
+      if (tm[i].n > 1)
+         snprintf(line + strlen(line), sizeof(line) - strlen(line), "%d)", tm[i].n);
+      ui_text(&ui_font_small, 136, y, line, C_TEXT2, UI_W - 140);
+   }
+   y += 4;
+   for (i = 0; i < 2; i++)
+      if (tm_pic[i][0])
+      {
+         snprintf(line, sizeof(line), "%s: %s", i ? "banner" : "icon", tm_pic[i]);
+         ui_text(&ui_font_small, 136, y, line, C_DIM, UI_W - 140);
+         y += 12;
+      }
+   snprintf(line, sizeof(line), "folder read %.0f ms (%lu)", tm_dir_us / 1000.0,
+            (unsigned long)tm_dir_n);
+   ui_text(&ui_font_small, 136, y, line, C_DIM, 0);
+   snprintf(line, sizeof(line), "bottom redraw %.1f ms", tm_bottom_us / 1000.0);
+   ui_text(&ui_font_small, 136, y + 12, line, C_DIM, 0);
+
+   n = snprintf(log, sizeof(log), "preview %s: %.1f ms\n", name, total / 1000.0);
+   for (i = 0; i < 2; i++)
+      if (tm_pic[i][0])
+         n += snprintf(log + n, sizeof(log) - n, "   %s: %s\n", i ? "banner" : "icon", tm_pic[i]);
+   for (i = 0; i < ntm && n < (int)sizeof(log) - 80; i++)
+      n += snprintf(log + n, sizeof(log) - n, "   %8.1f ms  %s%s\n", tm[i].us / 1000.0, tm[i].what,
+                    tm[i].n > 1 ? " (several times)" : "");
+   tm_log(log);
+}
+
+static void tm_report_stopped(const char *name)
+{
+   char line[400];
+   snprintf(line, sizeof(line), "preview %s: stopped by a button after %.1f ms\n", name, tm_total() / 1000.0);
+   tm_log(line);
+}
+#else
+#define tm_report(name)          ((void)0)
+#define tm_report_stopped(name)  ((void)0)
+#endif
+
 /* The top screen for what's selected. Returns false if a button stopped
  * it (the top screen is left as it was). */
 static bool draw_top_for(int tab, int sel, bool am)
@@ -1818,70 +1883,19 @@ static bool draw_top_for(int tab, int sel, bool am)
          if (preview_stopped)
          {
             cache_drop(a);
-#ifdef ICONMAKER_TIMING
+            if (spinner_last)              /* the top screen as it was, without the spinner */
             {
-               char line[400];
-               u32 total = 0;
-               int i;
-               for (i = 0; i < ntm; i++)
-                  if (tm[i].n > 0)
-                     total += tm[i].us;
-               snprintf(line, sizeof(line), "preview %s: stopped by a button after %.1f ms\n",
-                        entries[sel].name, total / 1000.0);
-               tm_log(line);
+               memcpy(ui_canvas, top_shown, sizeof(top_shown));
+               present_top_canvas();
+               present_top_canvas();
             }
-#endif
+            tm_report_stopped(entries[sel].name);
             return false;
          }
       }
       draw_top_game(a, entries[sel].has_icon);
       tm_mark("draw the top screen");
-#ifdef ICONMAKER_TIMING
-      {
-         /* the steps on a dark panel over the right of the preview */
-         char line[96], log[2000];
-         int i, y = 4, n;
-         u32 total = 0;
-         for (i = 0; i < ntm; i++)
-            if (tm[i].n > 0)                /* not the parts measured inside a step */
-               total += tm[i].us;
-         ui_fill_alpha(130, 0, UI_W - 130, UI_H, C_BG, 230);
-         snprintf(line, sizeof(line), "total %.0f ms", total / 1000.0);
-         ui_text(&ui_font_bold, 136, y, line, C_WARN, 0);
-         y += 20;
-         for (i = 0; i < ntm; i++, y += 12)
-         {
-            snprintf(line, sizeof(line), "%6.1f  %s%s", tm[i].us / 1000.0, tm[i].what,
-                     tm[i].n > 1 ? " (x" : "");
-            if (tm[i].n > 1)
-               snprintf(line + strlen(line), sizeof(line) - strlen(line), "%d)", tm[i].n);
-            ui_text(&ui_font_small, 136, y, line, C_TEXT2, UI_W - 140);
-         }
-         y += 4;
-         for (i = 0; i < 2; i++)
-            if (tm_pic[i][0])
-            {
-               snprintf(line, sizeof(line), "%s: %s", i ? "banner" : "icon", tm_pic[i]);
-               ui_text(&ui_font_small, 136, y, line, C_DIM, UI_W - 140);
-               y += 12;
-            }
-         snprintf(line, sizeof(line), "folder read %.0f ms (%lu)", tm_dir_us / 1000.0,
-                  (unsigned long)tm_dir_n);
-         ui_text(&ui_font_small, 136, y, line, C_DIM, 0);
-         snprintf(line, sizeof(line), "bottom redraw %.1f ms", tm_bottom_us / 1000.0);
-         ui_text(&ui_font_small, 136, y + 12, line, C_DIM, 0);
-
-         /* the same in the log, one step a line */
-         n = snprintf(log, sizeof(log), "preview %s: %.1f ms\n", entries[sel].name, total / 1000.0);
-         for (i = 0; i < 2; i++)
-            if (tm_pic[i][0])
-               n += snprintf(log + n, sizeof(log) - n, "   %s: %s\n", i ? "banner" : "icon", tm_pic[i]);
-         for (i = 0; i < ntm && n < (int)sizeof(log) - 80; i++)
-            n += snprintf(log + n, sizeof(log) - n, "   %8.1f ms  %s%s\n", tm[i].us / 1000.0, tm[i].what,
-                          tm[i].n > 1 ? " (several times)" : "");
-         tm_log(log);
-      }
-#endif
+      tm_report(entries[sel].name);
    }
    present_top();
    return true;
