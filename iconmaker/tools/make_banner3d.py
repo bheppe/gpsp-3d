@@ -14,8 +14,8 @@ Both start as noise, so the compressed model always has room for any picture.
 
   python3 tools/make_banner3d.py --jingle          only res/jingle.wav
   python3 tools/make_banner3d.py /path/to/pycgfx   the models, then the 3D
-      banners of gpSP 3D, Icon Maker and (if it's next to this repo, as
-      snes9x_3ds-pr2) Snes9x 3D, from their banner3d-name.png (256x64) and
+      banners of gpSP 3D, Icon Maker and Snes9x 3D (its source in SNES9X_DIR,
+      or next to this repo as snes9x_3ds), from their banner3d-name.png (256x64) and
       banner3d-label.png (128x128)
 
 The model needs pycgfx (https://github.com/skyfloogle/pycgfx, glTF to CGFX),
@@ -450,7 +450,9 @@ def make_app_banners():
                os.path.join(gp, "banner3d-label.png"), jingle, os.path.join(gp, "banner3d.bnr"))
     app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(RES, "banner3d-name.png"),
                os.path.join(RES, "banner3d-label.png"), jingle, os.path.join(RES, "banner3d-app.bnr"))
-    snes = os.path.join(root, "..", "snes9x_3ds-pr2", "resources")
+    # Snes9x 3D's source: SNES9X_DIR, else next to this repo
+    snes_dir = os.environ.get("SNES9X_DIR") or os.path.join(root, "..", "snes9x_3ds")
+    snes = os.path.join(snes_dir, "resources")
     if os.path.isfile(os.path.join(snes, "banner3d-name.png")):
         app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(snes, "banner3d-name.png"),
                    os.path.join(snes, "banner3d-label.png"), jingle,
