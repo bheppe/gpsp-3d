@@ -102,6 +102,10 @@ static icon_entry icons[MAX_ICONS];
 static int nicons;
 static char cwd[512] = "sdmc:/";
 
+/* the preview being made: when it started, and the spinner shown over the
+ * top screen while a slow one is made (see preview_stop) */
+static u64 preview_t0, spinner_last, spinner_ticks;
+
 /* ------------------------------------------------------------------ */
 /* timing (make TIMING=1): how long each step of the preview takes,    */
 /* shown on the top screen and added to iconmaker_timing.log           */
@@ -633,6 +637,8 @@ static u8 *load_picture(const char *game, const char *ext, int type, int min_w, 
       tm_note("  of it: reading the SD card", png_shrink_read_ticks);
       tm_note("  of it: libpng + zlib", png_shrink_rows_ticks - png_shrink_read_ticks);
       tm_note("  of it: averaging rows", png_shrink_average_ticks);
+      if (spinner_ticks)
+         tm_note("  of it: drawing the spinner", spinner_ticks);
 #endif
       if (!img && (!interlaced || *w > PIC_MAX_SIDE || *h > PIC_MAX_SIDE ||
                    (long long)*w * *h * 4 > PIC_MAX_FULL))
@@ -1070,7 +1076,11 @@ static void blit_565(const u16 *img, int w, int h, int x0, int y0, int scale)
 
 /* the canvas to the top screen (400 wide: the canvas in the middle, its
  * edge colours carried out to the sides) */
-static void present_top(void)
+/* what the top screen shows, so the spinner can be drawn over it */
+static u16 top_shown[UI_W * UI_H];
+
+/* the canvas to the top screen (centred on its 400 pixels) */
+static void present_top_canvas(void)
 {
    u16 *fb = (u16*)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
    int x, y;
@@ -1085,6 +1095,12 @@ static void present_top(void)
    }
    GSPGPU_FlushDataCache(fb, 400 * 240 * 2);
    gfxScreenSwapBuffers(GFX_TOP, false);
+}
+
+static void present_top(void)
+{
+   memcpy(top_shown, ui_canvas, sizeof(top_shown));
+   present_top_canvas();
 }
 
 /* a small SNES cartridge (wide, ridged sides) */
@@ -1681,13 +1697,49 @@ static void cache_drop(const game_art *a)
 }
 
 /* A button pressed while a preview is made stops it (a huge PNG can take
- * seconds); the main loop still gets the button. */
+ * seconds); the main loop still gets the button. Called every 16 rows of a
+ * PNG, which also turns the spinner once the preview takes a while. */
 static u32 preview_keys;
 static bool preview_stopped;
 
+#define SPINNER_AFTER  250       /* ms a preview takes before the spinner shows */
+#define SPINNER_EVERY  100       /* ms between its frames */
+#define MS_TICKS(ms)   ((u64)(ms) * (SYSCLOCK_ARM11 / 1000))
+
+static u16 mix565(u16 a, u16 b, int t)   /* t 0..256: a .. b */
+{
+   int r = ((a >> 11) * (256 - t) + (b >> 11) * t) >> 8;
+   int g = (((a >> 5) & 63) * (256 - t) + ((b >> 5) & 63) * t) >> 8;
+   int bl = ((a & 31) * (256 - t) + (b & 31) * t) >> 8;
+   return (u16)(r << 11 | g << 5 | bl);
+}
+
+/* the top screen as it is, with a small "loading" pill at the bottom: eight
+ * dots going round, and that any button skips */
+static void draw_spinner(u64 now)
+{
+   static const signed char dx[8] = { 6, 4, 0, -4, -6, -4, 0, 4 }, dy[8] = { 0, 4, 6, 4, 0, -4, -6, -4 };
+   static const char msg[] = "Loading the cover...   any button skips";
+   int i, w = ui_text_w(&ui_font_small, msg) + 40, x = (UI_W - w) / 2, y = UI_H - 30;
+   int head = (int)((now - preview_t0) / MS_TICKS(SPINNER_EVERY)) % 8;
+   memcpy(ui_canvas, top_shown, sizeof(top_shown));
+   ui_rrect(x, y, w, 22, 11, C_PANEL);
+   for (i = 0; i < 8; i++)
+      ui_circle(x + 14 + dx[i], y + 11 + dy[i], 2, mix565(C_ACCENT, C_PANEL, ((head - i + 8) % 8) * 28));
+   ui_text_vc(&ui_font_small, x + 28, y, 22, msg, C_TEXT2, 0);
+   present_top_canvas();
+}
+
 static int preview_stop(void)
 {
+   u64 now = svcGetSystemTick();
    u32 k;
+   if (now - preview_t0 > MS_TICKS(SPINNER_AFTER) && now - spinner_last > MS_TICKS(SPINNER_EVERY))
+   {
+      draw_spinner(now);
+      spinner_last = svcGetSystemTick();
+      spinner_ticks += spinner_last - now;
+   }
    hidScanInput();
    if (!(k = hidKeysDown()))
       return 0;
@@ -1733,6 +1785,8 @@ static bool draw_top_for(int tab, int sel, bool am)
          if (!(a = cache_slot(path)))
             a = &art;
          preview_stopped = false;
+         preview_t0 = svcGetSystemTick();
+         spinner_last = spinner_ticks = 0;
          png_shrink_stop = preview_stop;
          make_art(path, &entries[sel], a);
          png_shrink_stop = NULL;
