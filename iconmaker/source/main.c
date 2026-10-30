@@ -31,6 +31,8 @@
 #include "deficon.h"
 #include "ui.h"
 
+#include <turbojpeg.h>
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
@@ -64,7 +66,10 @@ enum { FIT_PAD, FIT_CROP, FIT_COUNT };
 static const char *fit_key[FIT_COUNT] = { "pad", "crop" };
 static int fit_mode = FIT_PAD;
 
-typedef struct { char name[256]; bool dir, has_icon; int sys; } entry;
+/* pic[0], pic[1]: the game's icon and banner picture, as an index into
+ * pic_types, or -1 if there's none (found when the folder is read) */
+typedef struct { char name[256]; bool dir, has_icon; int sys; s8 pic[2]; } entry;
+static const char *const pic_types[] = { "png", "jpg", "jpeg" };
 typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; int sys; } icon_entry;
 
 /* the emulators an icon can start (the publisher on an icon names it) */
@@ -164,7 +169,7 @@ static void tm_log(const char *line)
 }
 #else
 #define tm_start()  ((void)0)
-#define tm_mark(w)  ((void)0)
+#define tm_mark(w)  ((void)(w))
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -364,6 +369,67 @@ static int system_of(const char *path)
    return sys;
 }
 
+/* The pictures in the folder, by name: looking for a file that isn't there
+ * costs about 60 ms on the SD card, so each game's are found once, here */
+static char **pics;
+static int npics, pics_room;
+
+static bool is_picture(const char *name)
+{
+   const char *dot = strrchr(name, '.');
+   int i;
+   for (i = 0; dot && i < 3; i++)
+      if (!strcasecmp(dot + 1, pic_types[i]))
+         return true;
+   return false;
+}
+
+static void add_picture(const char *name)
+{
+   if (npics == pics_room)
+   {
+      int room = pics_room ? pics_room * 2 : 256;
+      char **p = realloc(pics, room * sizeof(char*));
+      if (!p)
+         return;
+      pics = p;
+      pics_room = room;
+   }
+   if ((pics[npics] = strdup(name)))
+      npics++;
+}
+
+static int cmp_name(const void *a, const void *b)
+{
+   return strcasecmp(*(char *const*)a, *(char *const*)b);
+}
+
+/* each game's icon (Golf.png) and banner picture (Golf.banner.png), if any */
+static void find_pictures(void)
+{
+   int i, k, t;
+   qsort(pics, npics, sizeof(char*), cmp_name);
+   for (i = 0; i < nentries; i++)
+   {
+      const char *name = entries[i].name, *dot = strrchr(name, '.');
+      entries[i].pic[0] = entries[i].pic[1] = -1;
+      if (entries[i].dir || !dot)
+         continue;
+      for (k = 0; k < 2; k++)
+         for (t = 2; t >= 0; t--)          /* png wins, as when they were opened in turn */
+         {
+            char want[300];
+            const char *key = want;
+            snprintf(want, sizeof(want), "%.*s%s.%s", (int)(dot - name), name, k ? ".banner" : "", pic_types[t]);
+            if (bsearch(&key, pics, npics, sizeof(char*), cmp_name))
+               entries[i].pic[k] = (s8)t;
+         }
+   }
+   for (i = 0; i < npics; i++)
+      free(pics[i]);
+   npics = 0;
+}
+
 static int cmp_entry(const void *a, const void *b)
 {
    const entry *x = a, *y = b;
@@ -388,6 +454,7 @@ static void read_dir(void)
    }
    if (!d)
       return;
+   npics = 0;
    while ((e = readdir(d)) && nentries < MAX_ENTRIES)
    {
       bool dir = e->d_type == DT_DIR;
@@ -395,6 +462,11 @@ static void read_dir(void)
       int sys = -1;
       if (e->d_name[0] == '.')
          continue;
+      if (!dir && is_picture(e->d_name))
+      {
+         add_picture(e->d_name);
+         continue;
+      }
       snprintf(path, sizeof(path), "%s%s", cwd, e->d_name);
       if (!dir && (sys = system_of(path)) < 0)
          continue;
@@ -410,6 +482,7 @@ static void read_dir(void)
       nentries++;
    }
    closedir(d);
+   find_pictures();
    qsort(entries + (strcmp(cwd, "sdmc:/") ? 1 : 0),
          nentries - (strcmp(cwd, "sdmc:/") ? 1 : 0), sizeof(entry), cmp_entry);
 #ifdef ICONMAKER_TIMING
@@ -423,6 +496,8 @@ static void read_dir(void)
    }
 #endif
 }
+
+static void cache_clear(void);
 
 static void enter(const char *name)
 {
@@ -440,6 +515,7 @@ static void enter(const char *name)
       strcat(cwd, name);
       strcat(cwd, "/");
    }
+   cache_clear();
    read_dir();
 }
 
@@ -453,46 +529,89 @@ static const u8 *template_smdh(const u8 *cia, u32 size)
    return NULL;
 }
 
-/* the game's picture with this ending ("" or ".banner") and .png, .jpg or
- * .jpeg (the SD card doesn't mind the case), or NULL */
-static u8 *load_picture(const char *game, const char *ext, int *w, int *h)
+/* A JPEG at the smallest size libjpeg-turbo decodes it to (1/8, 1/4, ...)
+ * that is still at least min_w x min_h, as RGBA; NULL if it can't read it.
+ * Much faster than decoding all of a big cover and scaling it down after. */
+static u8 *jpeg_load(const u8 *buf, size_t size, int min_w, int min_h, int *w, int *h)
 {
-   static const char *const types[] = { "png", "jpg", "jpeg" };
+   static tjhandle tj;
+   tjscalingfactor *sf, best = { 1, 1 };
+   int nsf, i, jw, jh;
+   u8 *img;
+   if (!tj && !(tj = tj3Init(TJINIT_DECOMPRESS)))
+      return NULL;
+   if (tj3DecompressHeader(tj, buf, size))
+      return NULL;
+   jw = tj3Get(tj, TJPARAM_JPEGWIDTH);
+   jh = tj3Get(tj, TJPARAM_JPEGHEIGHT);
+   if (jw <= 0 || jh <= 0)
+      return NULL;
+   sf = tj3GetScalingFactors(&nsf);
+   for (i = 0; sf && i < nsf; i++)
+      if (sf[i].num <= sf[i].denom && TJSCALED(jw, sf[i]) >= min_w && TJSCALED(jh, sf[i]) >= min_h &&
+          sf[i].num * best.denom < best.num * sf[i].denom)
+         best = sf[i];
+   if (tj3SetScalingFactor(tj, best))
+      return NULL;
+   *w = TJSCALED(jw, best);
+   *h = TJSCALED(jh, best);
+   if (!(img = malloc((size_t)*w * *h * 4)))
+      return NULL;
+   /* a warning (a damaged end, say) still gives a picture */
+   if (tj3Decompress8(tj, buf, size, img, 0, TJPF_RGBA) && tj3GetErrorCode(tj) == TJERR_FATAL)
+   {
+      free(img);
+      return NULL;
+   }
+   return img;
+}
+
+/* The game's picture with this ending ("" or ".banner") and type (an index
+ * into pic_types, -1: none), as RGBA, or NULL. A JPEG comes at least
+ * min_w x min_h (or its own size if smaller), but often not much bigger. */
+static u8 *load_picture(const char *game, const char *ext, int type, int min_w, int min_h, int *w, int *h)
+{
    char file[600];
    const char *dot = strrchr(game, '.');
-   int n, i;
    bool banner = ext[0] != 0;
-   for (i = 0; i < 3; i++)
+   u8 *buf, *img = NULL;
+   long size;
+   int n;
+   FILE *f;
+   if (type < 0)
+      return NULL;
+   snprintf(file, sizeof(file), "%.*s%s.%s", (int)(dot - game), game, ext, pic_types[type]);
+   if (!(f = fopen(file, "rb")))
+      return NULL;
+   fseek(f, 0, SEEK_END);
+   size = ftell(f);
+   fseek(f, 0, SEEK_SET);
+   buf = size > 0 && size < (32 << 20) ? malloc(size) : NULL;
+   if (buf && fread(buf, 1, size, f) != (size_t)size)
    {
-      u8 *img;
-      FILE *f;
-      snprintf(file, sizeof(file), "%.*s%s.%s", (int)(dot - game), game, ext, types[i]);
-      if (!(f = fopen(file, "rb")))
-      {
-         tm_mark(banner ? "banner: look for files" : "icon: look for files");
-         continue;
-      }
-      img = stbi_load_from_file(f, w, h, &n, 4);
-      tm_mark(banner ? "banner: read + decode" : "icon: read + decode");
-#ifdef ICONMAKER_TIMING
-      {
-         /* the file read again on its own: how much of that is the SD card */
-         static u8 buf[32768];
-         long bytes = 0;
-         size_t got;
-         fseek(f, 0, SEEK_SET);
-         while ((got = fread(buf, 1, sizeof(buf), f)) > 0)
-            bytes += got;
-         tm_mark(banner ? "banner: just reading (32K)" : "icon: just reading (32K)");
-         snprintf(tm_pic[banner], sizeof(tm_pic[0]), "%s %dx%d, %ld KB",
-                  types[i], img ? *w : 0, img ? *h : 0, bytes / 1024);
-      }
-#endif
-      fclose(f);
-      if (img)
-         return img;
+      free(buf);
+      buf = NULL;
    }
-   return NULL;
+   fclose(f);
+   tm_mark(banner ? "banner: read the file" : "icon: read the file");
+   if (!buf)
+      return NULL;
+   if (size > 2 && buf[0] == 0xFF && buf[1] == 0xD8)
+   {
+      img = jpeg_load(buf, size, min_w, min_h, w, h);
+      tm_mark(banner ? "banner: decode (libjpeg-turbo)" : "icon: decode (libjpeg-turbo)");
+   }
+   if (!img)                           /* PNGs, and JPEGs libjpeg-turbo can't read */
+   {
+      img = stbi_load_from_memory(buf, size, w, h, &n, 4);
+      tm_mark(banner ? "banner: decode (stb_image)" : "icon: decode (stb_image)");
+   }
+#ifdef ICONMAKER_TIMING
+   snprintf(tm_pic[banner], sizeof(tm_pic[0]), "%s, %ld KB, decoded at %dx%d",
+            pic_types[type], size / 1024, img ? *w : 0, img ? *h : 0);
+#endif
+   free(buf);
+   return img;
 }
 
 /* a picture to ow x oh, padded or cropped (fit_mode) */
@@ -672,37 +791,50 @@ typedef struct
    bool has_icon_png, has_banner_png;
 } game_art;
 
-static void make_art(const char *path, int sys, game_art *a)
+static void make_art(const char *path, const entry *e, game_art *a)
 {
    const char *name = strrchr(path, '/') + 1, *dot = strrchr(name, '.');
-   int n = (int)(dot - name), iw = 48, ih = 48, bw, bh;
-   u8 *icon_png, *banner_png;
+   int n = (int)(dot - name), sys = e->sys, iw, ih, bw, bh;
+   u8 *icon_png, *banner_png = NULL;
 
    snprintf(a->title, sizeof(a->title), "%.*s", n > 63 ? 63 : n, name);
    a->sys = sys;
-   icon_png = load_picture(path, "", &iw, &ih);
+   /* the picture at 128x128 first (the 3D tile, the generated banner), then
+    * the icon from that: big pictures are scaled down only once */
+   icon_png = load_picture(path, "", e->pic[0], 128, 128, &iw, &ih);
    a->has_icon_png = icon_png != NULL;
    if (icon_png)
-      fit_picture(icon_png, iw, ih, a->icon48, 48, 48);
-   else
-      default_icon_style(a->title, systems[sys].style, a->icon48);
-   tm_mark("icon: scale to 48x48");
-   /* the icon, square and big: on the 3D tile, and on the generated banner */
-   fit_picture(icon_png ? icon_png : a->icon48, icon_png ? iw : 48, icon_png ? ih : 48,
-               a->label, 128, 128);
-   tm_mark("icon: scale to 128x128");
-   banner_png = load_picture(path, ".banner", &bw, &bh);
-   a->has_banner_png = banner_png != NULL;
-   if (banner_png)
-      fit_picture(banner_png, bw, bh, a->banner, 256, 128);
-   else                                /* the icon, bigger, and the name */
    {
-      default_banner(a->title, a->label, 128, 128, a->banner,
-                     banner_style == STYLE_CLEAR ? BANNER_CLEAR : 0);
-      banner_name(a->title, sys, a->banner, 256 - 120 - 8);
+      fit_picture(icon_png, iw, ih, a->label, 128, 128);
+      tm_mark("icon: scale to 128x128");
+      image_fit(a->label, 128, 128, a->icon48, 48, 48);
+      stbi_image_free(icon_png);
    }
-   tm_mark("flat banner");
-   if (banner_style == STYLE_3D)
+   else
+   {
+      default_icon_style(a->title, systems[sys].style, a->icon48);
+      image_fit(a->icon48, 48, 48, a->label, 128, 128);
+   }
+   tm_mark("icon: scale to 48x48");
+   /* the 3D banner shows neither a banner picture nor the flat banner */
+   a->has_banner_png = e->pic[1] >= 0;
+   if (banner_style != STYLE_3D)
+   {
+      banner_png = load_picture(path, ".banner", e->pic[1], 256, 128, &bw, &bh);
+      if (banner_png)
+      {
+         fit_picture(banner_png, bw, bh, a->banner, 256, 128);
+         stbi_image_free(banner_png);
+      }
+      else                             /* the icon, bigger, and the name */
+      {
+         default_banner(a->title, a->label, 128, 128, a->banner,
+                        banner_style == STYLE_CLEAR ? BANNER_CLEAR : 0);
+         banner_name(a->title, sys, a->banner, 256 - 120 - 8);
+      }
+      tm_mark("flat banner");
+   }
+   else
    {
       name_strip(a->title, sys, a->name);
       tm_mark("3D: name strip");
@@ -725,18 +857,14 @@ static void make_art(const char *path, int sys, game_art *a)
       }
       tm_mark("3D: tile");
    }
-   if (icon_png)
-      stbi_image_free(icon_png);
-   if (banner_png)
-      stbi_image_free(banner_png);
-   tm_mark("free");
 }
 
 /* Make and install the icon for the game at path. Returns 0, or -1 with a
  * message in err. */
-static int make_icon(const char *path, int sys, char *err, int errlen)
+static int make_icon(const char *path, const entry *e, char *err, int errlen)
 {
    static game_art art;
+   int sys = e->sys;
    static u8 smdh[FWDCIA_SMDH_SIZE];
    char longt[160];
    const u8 *tsmdh;
@@ -748,7 +876,7 @@ static int make_icon(const char *path, int sys, char *err, int errlen)
    Handle h;
    Result r;
 
-   make_art(path, sys, &art);
+   make_art(path, e, &art);
    snprintf(longt, sizeof(longt), "%.110s (%s)", art.title, systems[sys].name);
 
    cia = malloc(size);
@@ -1085,7 +1213,7 @@ static void draw_top_game(const game_art *a, bool installed)
    ui_text(&ui_font_bold, 96, 164, a->title, C_TEXT, UI_W - 110);
    ui_text(&ui_font_small, 96, 186, !a->has_icon_png ? "Icon: made from the name"
            : fit_mode == FIT_CROP ? "Icon: its picture, cropped (X)" : "Icon: its picture, padded (X)", C_DIM, 0);
-   ui_text(&ui_font_small, 96, 201, a->has_banner_png ? (fit_mode == FIT_CROP ? "Banner: its .banner picture, cropped (X)"
+   ui_text(&ui_font_small, 96, 201, a->has_banner_png && banner_style != STYLE_3D ? (fit_mode == FIT_CROP ? "Banner: its .banner picture, cropped (X)"
                                                                             : "Banner: its .banner picture, padded (X)")
            : banner_style == STYLE_3D ? "Banner: 3D, the icon turns (SELECT)"
            : banner_style == STYLE_CLEAR ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)",
@@ -1248,7 +1376,7 @@ static void make_one(const entry *e)
    if (!dialog(again ? "Make the icon again?" : "Make an icon?", body, "Make icon", "Cancel", C_ACCENT))
       return;
    progress("Making the icon...", name, 0, 1);
-   if (make_icon(path, e->sys, err, sizeof(err)))
+   if (make_icon(path, e, err, sizeof(err)))
       dialog("Could not make it", err, "OK", NULL, C_ROW_SEL);
    else
       dialog("Done", "It's on the HOME Menu now.", "OK", NULL, UI_RGB(0x2E, 0x8B, 0x57));
@@ -1274,7 +1402,7 @@ static void make_folder(void)
       snprintf(line, sizeof(line), "%d of %d:  %s", done + failed + 1, ngames, entries[i].name);
       progress("Making icons...", line, done + failed, ngames);
       snprintf(path, sizeof(path), "%s%s", cwd, entries[i].name);
-      if (make_icon(path, entries[i].sys, err, sizeof(err)))
+      if (make_icon(path, &entries[i], err, sizeof(err)))
       {
          if (!failed)
             snprintf(first_err, sizeof(first_err), "%s", err);
@@ -1387,6 +1515,63 @@ static void load_dir(void)
 
 /* ------------------------------------------------------------------ */
 
+/* The last previews made, so going back to a game shows it at once. Cleared
+ * when the folder, the banner style or pad/crop changes. */
+#define CACHE_N        16
+#define PREVIEW_DELAY  18        /* frames (0.3 s) the selection must stay before a preview is made */
+static struct { char path[800]; game_art *art; u32 used; } cache[CACHE_N];
+static u32 cache_clock;
+
+static void cache_clear(void)
+{
+   int i;
+   for (i = 0; i < CACHE_N; i++)
+      cache[i].path[0] = 0;
+}
+
+static game_art *cache_find(const char *path)
+{
+   int i;
+   for (i = 0; i < CACHE_N; i++)
+      if (cache[i].art && !strcmp(cache[i].path, path))
+      {
+         cache[i].used = ++cache_clock;
+         return cache[i].art;
+      }
+   return NULL;
+}
+
+/* a slot for path's preview: an empty one, or the one unused longest */
+static game_art *cache_slot(const char *path)
+{
+   int i, old = 0;
+   for (i = 0; i < CACHE_N; i++)
+      if (!cache[i].path[0] || cache[i].used < cache[old].used)
+      {
+         old = i;
+         if (!cache[i].path[0])
+            break;
+      }
+   if (!cache[old].art && !(cache[old].art = malloc(sizeof(game_art))))
+      return NULL;
+   snprintf(cache[old].path, sizeof(cache[0].path), "%s", path);
+   cache[old].used = ++cache_clock;
+   return cache[old].art;
+}
+
+/* frames to wait before the top screen shows what's selected: a game's
+ * preview takes a while to make, so not while scrolling past it */
+static int preview_wait(int tab, int sel)
+{
+   char path[800];
+   if (tab != TAB_GAMES)
+      return 8;
+   if (!nentries || entries[sel].dir)
+      return 1;
+   snprintf(path, sizeof(path), "%s%s", cwd, entries[sel].name);
+   return cache_find(path) ? 1 : PREVIEW_DELAY;
+}
+
 static void draw_top_for(int tab, int sel, bool am)
 {
    static game_art art;
@@ -1413,9 +1598,17 @@ static void draw_top_for(int tab, int sel, bool am)
    {
       char path[800];
       snprintf(path, sizeof(path), "%s%s", cwd, entries[sel].name);
+      game_art *a;
       tm_start();
-      make_art(path, entries[sel].sys, &art);
-      draw_top_game(&art, entries[sel].has_icon);
+      if ((a = cache_find(path)))
+         tm_mark("from the cache");
+      else
+      {
+         if (!(a = cache_slot(path)))
+            a = &art;
+         make_art(path, &entries[sel], a);
+      }
+      draw_top_game(a, entries[sel].has_icon);
       tm_mark("draw the top screen");
 #ifdef ICONMAKER_TIMING
       {
@@ -1472,6 +1665,7 @@ int main(void)
    int top_wait = 0;           /* frames until the top screen is redrawn */
    bool am, redraw = true;
 
+   osSetSpeedupEnable(true);           /* New 3DS: the faster CPU and its L2 cache */
    gfxInit(GSP_RGB565_OES, GSP_RGB565_OES, false);
    am = R_SUCCEEDED(amInit());
    hidSetRepeatParameters(20, 4);
@@ -1538,6 +1732,7 @@ int main(void)
          {
             /* the banner style, for icons made from now on */
             banner_style = (banner_style + 1) % STYLE_COUNT;
+            cache_clear();
             save_settings();
             top_wait = 1;
             redraw = true;
@@ -1546,6 +1741,7 @@ int main(void)
          {
             /* pad or crop pictures of another shape, for icons made from now on */
             fit_mode = (fit_mode + 1) % FIT_COUNT;
+            cache_clear();
             save_settings();
             top_wait = 1;
             redraw = true;
@@ -1615,11 +1811,13 @@ int main(void)
             tm_log(line);
          }
 #endif
-         if (sel != old_sel || tab != old_tab || redraw)
-            top_wait = 8;                      /* wait for the selection to settle */
+         if (sel != old_sel || tab != old_tab)
+            top_wait = preview_wait(tab, sel); /* wait for the selection to settle */
+         else if (redraw && !top_wait)
+            top_wait = preview_wait(tab, sel);
          redraw = false;
       }
-      /* the top preview, once the selection stops moving (loading PNGs) */
+      /* the top preview, once the selection stops moving */
       if (top_wait && !--top_wait)
       {
          draw_top_for(tab, sel, am);

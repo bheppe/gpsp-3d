@@ -30,8 +30,9 @@ CFLAGS   += -DICONMAKER_TIMING
 endif
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
-LIBS     := -lctru -lm
-LIBDIRS  := $(CTRULIB)
+# libjpeg-turbo (3ds-libjpeg-turbo) decodes JPEG covers at the size needed
+LIBS     := -lturbojpeg -lctru -lm
+LIBDIRS  := $(PORTLIBS) $(CTRULIB)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 export OUTPUT  := $(CURDIR)/$(TARGET)
