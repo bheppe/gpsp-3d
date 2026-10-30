@@ -1103,6 +1103,22 @@ static void present_top(void)
    present_top_canvas();
 }
 
+/* only the canvas's w x h at (x0, y0) to the top screen: the rest of both
+ * of its framebuffers must already show the same */
+static void present_top_rect(int x0, int y0, int w, int h)
+{
+   u16 *fb = (u16*)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
+   int x, y;
+   for (x = x0; x < x0 + w; x++)
+   {
+      u16 *col = fb + (x + 40) * 240 + 239 - y0;
+      for (y = y0; y < y0 + h; y++)
+         *col-- = ui_canvas[y * UI_W + x];
+   }
+   GSPGPU_FlushDataCache(fb + (x0 + 40) * 240, w * 240 * 2);
+   gfxScreenSwapBuffers(GFX_TOP, false);
+}
+
 /* a small SNES cartridge (wide, ridged sides) */
 static void icon_snes(int x, int y, u16 c)
 {
@@ -1715,19 +1731,28 @@ static u16 mix565(u16 a, u16 b, int t)   /* t 0..256: a .. b */
 }
 
 /* the top screen as it is, with a small "loading" pill at the bottom: eight
- * dots going round, and that any button skips */
-static void draw_spinner(u64 now)
+ * dots going round, and that a button skips. The first frame is the whole
+ * screen (so both framebuffers have it), the rest only the pill: the Old
+ * 3DS spent a tenth of its time on whole frames. */
+static void draw_spinner(u64 now, bool first)
 {
    static const signed char dx[8] = { 6, 4, 0, -4, -6, -4, 0, 4 }, dy[8] = { 0, 4, 6, 4, 0, -4, -6, -4 };
-   static const char msg[] = "Loading the cover...   any button skips";
+   static const char msg[] = "Loading the cover...   press any button to skip";
    int i, w = ui_text_w(&ui_font_small, msg) + 40, x = (UI_W - w) / 2, y = UI_H - 30;
    int head = (int)((now - preview_t0) / MS_TICKS(SPINNER_EVERY)) % 8;
-   memcpy(ui_canvas, top_shown, sizeof(top_shown));
+   if (first)
+      memcpy(ui_canvas, top_shown, sizeof(top_shown));
    ui_rrect(x, y, w, 22, 11, C_PANEL);
    for (i = 0; i < 8; i++)
       ui_circle(x + 14 + dx[i], y + 11 + dy[i], 2, mix565(C_ACCENT, C_PANEL, ((head - i + 8) % 8) * 28));
-   ui_text_vc(&ui_font_small, x + 28, y, 22, msg, C_TEXT2, 0);
-   present_top_canvas();
+   if (first)
+   {
+      ui_text_vc(&ui_font_small, x + 28, y, 22, msg, C_TEXT2, 0);
+      present_top_canvas();
+      present_top_canvas();            /* both framebuffers */
+   }
+   else                                /* only the dots change */
+      present_top_rect(x + 4, y + 1, 21, 20);
 }
 
 static int preview_stop(void)
@@ -1736,7 +1761,7 @@ static int preview_stop(void)
    u32 k;
    if (now - preview_t0 > MS_TICKS(SPINNER_AFTER) && now - spinner_last > MS_TICKS(SPINNER_EVERY))
    {
-      draw_spinner(now);
+      draw_spinner(now, !spinner_last);
       spinner_last = svcGetSystemTick();
       spinner_ticks += spinner_last - now;
    }
