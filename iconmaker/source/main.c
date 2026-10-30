@@ -910,7 +910,23 @@ static void draw_top_game(const game_art *a, bool installed)
    top_bg();
    ui_text(&ui_font_small, 32, 6, "HOME Menu preview", C_DIM, 0);
    ui_rrect_outline(30, 22, 260, 132, 6, 1, C_FAINT);
-   blit_rgba(a->banner, 256, 128, 32, 24, 1);
+   if (banner_style == STYLE_3D)
+   {
+      /* the 3D banner: the icon on its tile, the name strip under it (half size) */
+      static u8 half[128 * 32 * 4];
+      int x, y, k;
+      for (y = 0; y < 32; y++)
+         for (x = 0; x < 128; x++)
+            for (k = 0; k < 4; k++)
+            {
+               const u8 *p = a->name + ((y * 2) * 256 + x * 2) * 4 + k;
+               half[(y * 128 + x) * 4 + k] = (u8)((p[0] + p[4] + p[256 * 4] + p[256 * 4 + 4]) / 4);
+            }
+      blit_rgba(a->label, 128, 128, 96, 24, 1);
+      blit_rgba(half, 128, 32, 96, 121, 1);
+   }
+   else
+      blit_rgba(a->banner, 256, 128, 32, 24, 1);
 
    ui_rrect(28, 164, 56, 56, 10, C_PANEL);
    blit_rgba(a->icon48, 48, 48, 32, 168, 1);
@@ -1163,7 +1179,7 @@ static void save_settings(void)
    mkdir("sdmc:/3ds/gpsp3d", 0777);
    if ((f = fopen(SETTINGS, "w")))
    {
-      fprintf(f, "banner_style=%s\n", style_key[banner_style]);
+      fprintf(f, "banner=%s\n", style_key[banner_style]);
       fclose(f);
    }
 }
@@ -1175,12 +1191,12 @@ static void load_settings(void)
    if (!f)
       return;
    while (fgets(buf, sizeof(buf), f))
-      if (!strncmp(buf, "banner_style=", 13))
+      if (!strncmp(buf, "banner=", 7))
       {
          int i;
          buf[strcspn(buf, "\r\n")] = 0;
          for (i = 0; i < STYLE_COUNT; i++)
-            if (!strcmp(buf + 13, style_key[i]))
+            if (!strcmp(buf + 7, style_key[i]))
                banner_style = i;
       }
    fclose(f);

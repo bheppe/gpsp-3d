@@ -28,7 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "..", "res")
 
 # ---- layout (the HOME Menu shows about y -8..9; it turns the model about x = 0) ----
-TILE_W, TILE_D = 9.5, 0.9                  # the tile: face, depth
+TILE_W, TILE_D = 9.5, 0.12                 # the tile: face, gap between its two faces (no sides,
+                                           # so it stays round when it turns)
 CORNER, CORNER_SEG = 0.2, 6                # corner radius (of the width), points per corner
 TILE_Y = 3.6                               # its centre
 NAME_W, NAME_Y = 26.0, -7.9                # the name strip: width, bottom edge (height = width / 4)
@@ -196,7 +197,7 @@ def make_gltf(animated=True, rounded=False):
             {"name": "Tile", "mesh": 0, "translation": [0, TILE_Y, 0]},
             {"name": "Name", "mesh": 1},
         ],
-        "meshes": [{"name": "Tile", "primitives": [faces, body]},
+        "meshes": [{"name": "Tile", "primitives": [faces, body] if rounded else [faces]},
                    {"name": "Name", "primitives": [name]}],
         "materials": [
             # the icon's corners are cut round by its transparency (a rounded
@@ -227,33 +228,55 @@ def make_gltf(animated=True, rounded=False):
     return gltf
 
 
-def make_jingle(path):
-    """A short original chime (about 1.6 s): a rising arpeggio on a soft
-    pulse wave with an echo, 32 kHz mono, quiet enough for the HOME Menu."""
-    rate = 32730
-    notes = [(0.00, 72, 0.3), (0.11, 76, 0.3), (0.22, 79, 0.3), (0.33, 84, 0.3), (0.55, 83, 0.3),
-             (0.66, 84, 0.9)]
-    total = int(rate * 1.6)
+def jingle_samples(rate=32730):
+    """A short, soft chime (about 1.8 s): two sine-bell notes a fifth apart,
+    slow to fade, with a gentle echo; quiet, so hovering over the icon is
+    calm rather than loud."""
+    notes = [(0.00, 72), (0.16, 79)]           # C5, then G5
+    total = int(rate * 1.8)
     out = [0.0] * total
-    for start, midi, length in notes:
+    for start, midi in notes:
         f = 440 * 2 ** ((midi - 69) / 12)
         s0 = int(start * rate)
-        for i in range(int(length * rate)):
-            if s0 + i >= total:
-                break
+        for i in range(total - s0):
             t = i / rate
-            env = min(1, t * 200) * math.exp(-t * (3.5 if length > 0.5 else 9))
-            ph = (f * t) % 1
-            v = (0.6 if ph < 0.25 else -0.2) + 0.4 * math.sin(2 * math.pi * f * t)
-            out[s0 + i] += 0.22 * env * v
-    d = int(0.18 * rate)
-    for i in range(total - 1, d - 1, -1):          # one echo
-        out[i] += 0.3 * out[i - d]
+            env = min(1.0, t / 0.012) * math.exp(-t * 2.6)
+            # a sine with a little of its octave, like a soft bell
+            v = math.sin(2 * math.pi * f * t) + 0.18 * math.sin(4 * math.pi * f * t) * math.exp(-t * 6)
+            out[s0 + i] += 0.16 * env * v
+    d = int(0.21 * rate)
+    for i in range(total - 1, d - 1, -1):
+        out[i] += 0.22 * out[i - d]
+    for i in range(int(0.15 * rate)):           # fade the tail to silence
+        out[total - 1 - i] *= i / (0.15 * rate)
+    return rate, [int(max(-1, min(1, v)) * 32767) for v in out]
+
+
+def make_jingle(path):
+    rate, smp = jingle_samples()
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(rate)
-        w.writeframes(b"".join(struct.pack("<h", int(max(-1, min(1, v)) * 32767)) for v in out))
+        w.writeframes(b"".join(struct.pack("<h", v) for v in smp))
+
+
+def make_cwav(path):
+    """The jingle as a CWAV (what a banner holds): PCM16 mono, laid out
+    like bannertool's."""
+    rate, smp = jingle_samples()
+    pcm = b"".join(struct.pack("<h", v) for v in smp)
+    data_size = 0x20 + len(pcm)
+    info = b"INFO" + struct.pack("<I", 0x40) + struct.pack("<BBH", 1, 0, 0) + struct.pack(
+        "<IIII", rate, 0, len(smp), 0) + struct.pack("<I", 1) + struct.pack("<HHi", 0x7100, 0, 0x0C) + \
+        struct.pack("<HHi", 0x1F00, 0, 0x18) + struct.pack("<HHi", 0, 0, -1) + struct.pack("<I", 0)
+    info += bytes(0x40 - len(info))
+    total = 0x40 + 0x40 + data_size
+    hdr = b"CWAV" + struct.pack("<HHII", 0xFEFF, 0x40, 0x02010000, total) + struct.pack("<HH", 2, 0) + \
+        struct.pack("<HHII", 0x7000, 0, 0x40, 0x40) + struct.pack("<HHII", 0x7001, 0, 0x80, data_size)
+    hdr += bytes(0x40 - len(hdr))
+    with open(path, "wb") as f:
+        f.write(hdr + info + b"DATA" + struct.pack("<I", data_size) + bytes(0x18) + pcm)
 
 
 def hardware_fixes(cgfx):
@@ -420,7 +443,7 @@ def make_app_banners():
     snes = os.path.join(root, "..", "snes9x_3ds-pr2", "resources")
     if os.path.isfile(os.path.join(snes, "banner3d-name.png")):
         app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(snes, "banner3d-name.png"),
-                   os.path.join(snes, "banner3d-label.png"), _cwav_of(os.path.join(snes, "banner.bnr")),
+                   os.path.join(snes, "banner3d-label.png"), jingle,
                    os.path.join(snes, "banner.bnr"))
 
 
@@ -428,7 +451,8 @@ def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     make_jingle(os.path.join(RES, "jingle.wav"))
-    print("wrote res/jingle.wav")
+    make_cwav(os.path.join(RES, "jingle.bcwav"))
+    print("wrote res/jingle.wav and jingle.bcwav")
     if sys.argv[1] == "--jingle":
         return
     pycgfx_dir = os.path.abspath(sys.argv[1])
