@@ -20,6 +20,11 @@ in [Snes9x 3D](https://github.com/bheppe/snes9x_3ds).
    transparency), the tile's grey on the 3D banner, and see-through on a flat
    banner. X on the Games tab switches to cropping (scaled to fill, the edges
    cut off) for the icon, the 3D tile and the banner alike; the choice is saved.
+   Covers can be big: PNGs are shrunk while they're read and JPEGs decoded
+   small, so even a 15 MB cover needs little memory. Only pictures over 4096
+   pixels on a side, and interlaced PNGs whose full picture would take over
+   8 MB, can't be used: the preview says "picture too big" and the icon is
+   made from the name.
 3. Open Icon Maker, pick the game, press A twice. Its icon appears on the HOME Menu
    and opens gpSP 3D straight into the game.
 
@@ -45,4 +50,5 @@ gltflib and Pillow: `python3 tools/make_banner3d.py /path/to/pycgfx`).
 How it works: `source/fwdcia.c` copies the template, gives it a title ID made from
 the game's path, writes the game's path into the forwarder's slot, sets the name
 and icon, and redoes every hash the 3DS checks. `test/` checks this on a PC
-(`fwdtest` patches a CIA, `verify.py` checks every hash independently).
+(`fwdtest` patches a CIA, `verify.py` checks every hash independently;
+`pngtest` shrinks a PNG as Icon Maker does, with the PC's libpng).

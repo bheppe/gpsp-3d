@@ -24,10 +24,16 @@ ICON            := res/icon.png
 
 ARCH     := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS   := -g -Wall -O2 -mword-relocations -ffunction-sections $(ARCH) $(INCLUDE) -D__3DS__
+# make TIMING=1: a build that shows how long each step of the preview takes
+ifneq ($(TIMING),)
+CFLAGS   += -DICONMAKER_TIMING
+endif
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
-LIBS     := -lctru -lm
-LIBDIRS  := $(CTRULIB)
+# libjpeg-turbo (3ds-libjpeg-turbo) decodes JPEG covers at the size needed,
+# libpng (3ds-libpng) reads PNGs a row at a time
+LIBS     := -lturbojpeg -lpng16 -lz -lctru -lm
+LIBDIRS  := $(PORTLIBS) $(CTRULIB)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 export OUTPUT  := $(CURDIR)/$(TARGET)
