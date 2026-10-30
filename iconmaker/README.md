@@ -7,14 +7,19 @@ in [Snes9x 3D](https://github.com/bheppe/snes9x_3ds).
 1. Install `iconmaker.cia` with FBI (or run `iconmaker.3dsx` from the Homebrew Launcher).
    gpSP 3D (and Snes9x 3D, for SNES games) must be installed as a CIA. Snes9x 3D needs
    the version that reads `sdmc:/3ds/snes9x_3ds/launch.txt` at startup.
-2. Optional: put a PNG next to a game with the same name (`Golf.gba` -> `Golf.png`),
-   best square. It becomes the icon; without one the icon is a cartridge
-   with the game's name on it, colored by the name. Making a game again replaces its icon.
+2. Optional: put a PNG or JPEG next to a game with the same name (`Golf.gba` ->
+   `Golf.png` or `Golf.jpg`), any size. It becomes the icon; without one the icon
+   is a cartridge with the game's name on it, colored by the name. Making a game again replaces its icon.
    The top screen banner is 3D by default: the icon on a rounded tile that turns and
    bobs, the game's name under it, and a soft chime. SELECT on the Games tab switches
    between that and a flat banner (blue, or no background), and the choice is saved.
-   A flat banner can come from `Golf.banner.png` (best 256x128; other sizes are
-   fitted); without one it's the icon, bigger, with the game's name.
+   A flat banner can come from `Golf.banner.png` or `.jpg` (best 256x128);
+   without one it's the icon, bigger, with the game's name.
+   A picture of another shape (most box art isn't square) is padded to fit by
+   default: the margins are white on the icon (HOME Menu icons have no
+   transparency), the tile's grey on the 3D banner, and see-through on a flat
+   banner. X on the Games tab switches to cropping (scaled to fill, the edges
+   cut off) for the icon, the 3D tile and the banner alike; the choice is saved.
 3. Open Icon Maker, pick the game, press A twice. Its icon appears on the HOME Menu
    and opens gpSP 3D straight into the game.
 

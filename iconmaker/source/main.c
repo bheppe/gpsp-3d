@@ -7,11 +7,12 @@
  * gpSP 3D for GBA games, Snes9x 3D for SNES games (it writes the game's
  * path to the file the emulator reads at startup, then starts it).
  *
- * Name: the game's file name. Icon: a PNG next to the game with the same
- * name (Golf.gba -> Golf.png, any size, best square), else a cartridge
- * with the game's name on it. Top screen banner: Golf.banner.png (best
- * 256x128), else the icon, bigger, with the name. The top screen shows
- * both before anything is made.
+ * Name: the game's file name. Icon: a PNG or JPEG next to the game with
+ * the same name (Golf.gba -> Golf.png or Golf.jpg, any size), else a
+ * cartridge with the game's name on it. Top screen banner: Golf.banner.png
+ * or .jpg (best 256x128), else the icon, bigger, with the name. A picture of
+ * another shape is padded (the default) or cropped to fit (X on the Games
+ * tab). The top screen shows both before anything is made.
  *
  * Y makes icons for every game in a folder. The "My icons" tab lists the
  * icons made (here or by make-forwarders.sh) and deletes them.
@@ -31,6 +32,7 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
 #define STBI_NO_STDIO_WRITE
 #include "stb_image.h"
 
@@ -52,6 +54,14 @@
 enum { STYLE_BLUE, STYLE_CLEAR, STYLE_3D, STYLE_COUNT };
 static const char *style_key[STYLE_COUNT] = { "blue", "none", "3d" };
 static int banner_style = STYLE_3D;
+
+/* A picture of another shape than the icon, banner or tile: shrunk to fit
+ * with margins (white on the icon, as the HOME Menu draws see-through
+ * parts; the tile's grey on the 3D banner), or
+ * scaled to fill it with the sides cut off (X on the Games tab; saved too) */
+enum { FIT_PAD, FIT_CROP, FIT_COUNT };
+static const char *fit_key[FIT_COUNT] = { "pad", "crop" };
+static int fit_mode = FIT_PAD;
 
 typedef struct { char name[256]; bool dir, has_icon; int sys; } entry;
 typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; int sys; } icon_entry;
@@ -351,14 +361,31 @@ static const u8 *template_smdh(const u8 *cia, u32 size)
    return NULL;
 }
 
-/* the game's picture with this ending ("png" or "banner.png"), or NULL */
-static u8 *load_png(const char *game, const char *ext, int *w, int *h)
+/* the game's picture with this ending ("" or ".banner") and .png, .jpg or
+ * .jpeg (the SD card doesn't mind the case), or NULL */
+static u8 *load_picture(const char *game, const char *ext, int *w, int *h)
 {
-   char png[600];
+   static const char *const types[] = { "png", "jpg", "jpeg" };
+   char file[600];
    const char *dot = strrchr(game, '.');
-   int n;
-   snprintf(png, sizeof(png), "%.*s.%s", (int)(dot - game), game, ext);
-   return stbi_load(png, w, h, &n, 4);
+   int n, i;
+   for (i = 0; i < 3; i++)
+   {
+      u8 *img;
+      snprintf(file, sizeof(file), "%.*s%s.%s", (int)(dot - game), game, ext, types[i]);
+      if ((img = stbi_load(file, w, h, &n, 4)))
+         return img;
+   }
+   return NULL;
+}
+
+/* a picture to ow x oh, padded or cropped (fit_mode) */
+static void fit_picture(const u8 *img, int w, int h, u8 *out, int ow, int oh)
+{
+   if (fit_mode == FIT_CROP)
+      image_fill(img, w, h, out, ow, oh);
+   else
+      image_fit(img, w, h, out, ow, oh);
 }
 
 /* Text in one of gpSP 3D's fonts onto an RGBA picture (w wide), with a
@@ -537,29 +564,28 @@ static void make_art(const char *path, int sys, game_art *a)
 
    snprintf(a->title, sizeof(a->title), "%.*s", n > 63 ? 63 : n, name);
    a->sys = sys;
-   icon_png = load_png(path, "png", &iw, &ih);
+   icon_png = load_picture(path, "", &iw, &ih);
    a->has_icon_png = icon_png != NULL;
    if (icon_png)
-      icon_scale48(icon_png, iw, ih, a->icon48);
+      fit_picture(icon_png, iw, ih, a->icon48, 48, 48);
    else
-   {
       default_icon_style(a->title, systems[sys].style, a->icon48);
-      iw = ih = 48;
-   }
-   banner_png = load_png(path, "banner.png", &bw, &bh);
+   /* the icon, square and big: on the 3D tile, and on the generated banner */
+   fit_picture(icon_png ? icon_png : a->icon48, icon_png ? iw : 48, icon_png ? ih : 48,
+               a->label, 128, 128);
+   banner_png = load_picture(path, ".banner", &bw, &bh);
    a->has_banner_png = banner_png != NULL;
    if (banner_png)
-      banner_from_image(banner_png, bw, bh, a->banner);
+      fit_picture(banner_png, bw, bh, a->banner, 256, 128);
    else                                /* the icon, bigger, and the name */
    {
-      default_banner(a->title, icon_png ? icon_png : a->icon48, iw, ih, a->banner,
+      default_banner(a->title, a->label, 128, 128, a->banner,
                      banner_style == STYLE_CLEAR ? BANNER_CLEAR : 0);
       banner_name(a->title, sys, a->banner, 256 - 120 - 8);
    }
    if (banner_style == STYLE_3D)
    {
       name_strip(a->title, sys, a->name);
-      image_fit(icon_png ? icon_png : a->icon48, iw, ih, a->label, 128, 128);
       {
          /* see-through parts take the tile's grey (make_banner3d.py's Body);
           * outside a square with rounded corners (radius 0.2 of the width,
@@ -826,8 +852,8 @@ static void draw_bottom(int tab, int sel, int top)
       char info[64];
       static const char *const style_short[STYLE_COUNT] = { "blue", "no background", "3D" };
       int iw;
-      snprintf(info, sizeof(info), "%d game%s   SELECT: banner %s", ngames, ngames == 1 ? "" : "s",
-               style_short[banner_style]);
+      snprintf(info, sizeof(info), "%d game%s   SELECT: %s   X: %s", ngames, ngames == 1 ? "" : "s",
+               style_short[banner_style], fit_key[fit_mode]);
       iw = ui_text_w(&ui_font_small, info);
       ui_text(&ui_font_small, 10, LIST_Y - 18, cwd + 5, C_FAINT, UI_W - 30 - iw);
       ui_text_right(&ui_font_small, UI_W - 10, LIST_Y - 18, info, C_DIM);
@@ -931,8 +957,10 @@ static void draw_top_game(const game_art *a, bool installed)
    ui_rrect(28, 164, 56, 56, 10, C_PANEL);
    blit_rgba(a->icon48, 48, 48, 32, 168, 1);
    ui_text(&ui_font_bold, 96, 164, a->title, C_TEXT, UI_W - 110);
-   ui_text(&ui_font_small, 96, 186, a->has_icon_png ? "Icon: its PNG" : "Icon: made from the name", C_DIM, 0);
-   ui_text(&ui_font_small, 96, 201, a->has_banner_png ? "Banner: its .banner.png"
+   ui_text(&ui_font_small, 96, 186, !a->has_icon_png ? "Icon: made from the name"
+           : fit_mode == FIT_CROP ? "Icon: its picture, cropped (X)" : "Icon: its picture, padded (X)", C_DIM, 0);
+   ui_text(&ui_font_small, 96, 201, a->has_banner_png ? (fit_mode == FIT_CROP ? "Banner: its .banner picture, cropped (X)"
+                                                                            : "Banner: its .banner picture, padded (X)")
            : banner_style == STYLE_3D ? "Banner: 3D, the icon turns (SELECT)"
            : banner_style == STYLE_CLEAR ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)",
            C_DIM, 0);
@@ -968,10 +996,11 @@ static void draw_top_intro(void)
    ui_text_center(&ui_font_title, UI_W / 2, 40, "Icon Maker", C_TEXT);
    ui_text_center(&ui_font_small, UI_W / 2, 68, "Puts GBA and SNES games on the HOME Menu", C_DIM);
    text_lines(&ui_font_small, 40, 100, 16,
-              "Icon: Golf.png next to Golf.gba (best square),\n"
+              "Icon: Golf.png or .jpg next to Golf.gba,\n"
               "else a cartridge with the game's name.\n"
-              "Banner: Golf.banner.png (best 256x128),\n"
-              "else the icon, bigger, with the name.\n\n"
+              "Banner: Golf.banner.png or .jpg (256x128),\n"
+              "else the icon, bigger, with the name.\n"
+              "Other shapes: X pads or crops them.\n\n"
               "GBA games open in gpSP 3D, SNES games\n"
               "in Snes9x 3D: install them as CIAs.", C_TEXT2, UI_W - 60);
 }
@@ -1180,6 +1209,7 @@ static void save_settings(void)
    if ((f = fopen(SETTINGS, "w")))
    {
       fprintf(f, "banner=%s\n", style_key[banner_style]);
+      fprintf(f, "fit=%s\n", fit_key[fit_mode]);
       fclose(f);
    }
 }
@@ -1198,6 +1228,14 @@ static void load_settings(void)
          for (i = 0; i < STYLE_COUNT; i++)
             if (!strcmp(buf + 7, style_key[i]))
                banner_style = i;
+      }
+      else if (!strncmp(buf, "fit=", 4))
+      {
+         int i;
+         buf[strcspn(buf, "\r\n")] = 0;
+         for (i = 0; i < FIT_COUNT; i++)
+            if (!strcmp(buf + 4, fit_key[i]))
+               fit_mode = i;
       }
    fclose(f);
 }
@@ -1324,6 +1362,14 @@ int main(void)
          {
             /* the banner style, for icons made from now on */
             banner_style = (banner_style + 1) % STYLE_COUNT;
+            save_settings();
+            top_wait = 1;
+            redraw = true;
+         }
+         else if (k & KEY_X)
+         {
+            /* pad or crop pictures of another shape, for icons made from now on */
+            fit_mode = (fit_mode + 1) % FIT_COUNT;
             save_settings();
             top_wait = 1;
             redraw = true;
