@@ -1385,9 +1385,9 @@ static void draw_top_icon(const icon_entry *ic)
 
 /* ---- dialogs on the bottom screen ---- */
 
-static bool touched(touchPosition *t)
+static bool touched(u32 k, touchPosition *t)
 {
-   if (!(hidKeysDown() & KEY_TOUCH))
+   if (!(k & KEY_TOUCH))
       return false;
    hidTouchRead(t);
    return true;
@@ -1431,7 +1431,7 @@ static bool dialog(const char *title, const char *body, const char *ok, const ch
       k = hidKeysDown();
       if (k & KEY_A) return true;
       if (k & KEY_B) return cancel ? false : true;
-      if (touched(&t) && t.py >= y0 + h - 40 && t.py < y0 + h - 12)
+      if (touched(k, &t) && t.py >= y0 + h - 40 && t.py < y0 + h - 12)
       {
          if (!cancel && t.px >= (UI_W - bw) / 2 && t.px < (UI_W + bw) / 2) return true;
          if (cancel && t.px >= UI_W - 30 - bw && t.px < UI_W - 30) return true;
@@ -1672,7 +1672,33 @@ static int preview_wait(int tab, int sel)
    return cache_find(path) ? 1 : PREVIEW_DELAY;
 }
 
-static void draw_top_for(int tab, int sel, bool am)
+static void cache_drop(const game_art *a)
+{
+   int i;
+   for (i = 0; i < CACHE_N; i++)
+      if (cache[i].art == a)
+         cache[i].path[0] = 0;
+}
+
+/* A button pressed while a preview is made stops it (a huge PNG can take
+ * seconds); the main loop still gets the button. */
+static u32 preview_keys;
+static bool preview_stopped;
+
+static int preview_stop(void)
+{
+   u32 k;
+   hidScanInput();
+   if (!(k = hidKeysDown()))
+      return 0;
+   preview_keys |= k;
+   preview_stopped = true;
+   return 1;
+}
+
+/* The top screen for what's selected. Returns false if a button stopped
+ * it (the top screen is left as it was). */
+static bool draw_top_for(int tab, int sel, bool am)
 {
    static game_art art;
    if (!am)
@@ -1697,8 +1723,8 @@ static void draw_top_for(int tab, int sel, bool am)
    else
    {
       char path[800];
-      snprintf(path, sizeof(path), "%s%s", cwd, entries[sel].name);
       game_art *a;
+      snprintf(path, sizeof(path), "%s%s", cwd, entries[sel].name);
       tm_start();
       if ((a = cache_find(path)))
          tm_mark("from the cache");
@@ -1706,7 +1732,28 @@ static void draw_top_for(int tab, int sel, bool am)
       {
          if (!(a = cache_slot(path)))
             a = &art;
+         preview_stopped = false;
+         png_shrink_stop = preview_stop;
          make_art(path, &entries[sel], a);
+         png_shrink_stop = NULL;
+         if (preview_stopped)
+         {
+            cache_drop(a);
+#ifdef ICONMAKER_TIMING
+            {
+               char line[400];
+               u32 total = 0;
+               int i;
+               for (i = 0; i < ntm; i++)
+                  if (tm[i].n > 0)
+                     total += tm[i].us;
+               snprintf(line, sizeof(line), "preview %s: stopped by a button after %.1f ms\n",
+                        entries[sel].name, total / 1000.0);
+               tm_log(line);
+            }
+#endif
+            return false;
+         }
       }
       draw_top_game(a, entries[sel].has_icon);
       tm_mark("draw the top screen");
@@ -1758,6 +1805,7 @@ static void draw_top_for(int tab, int sel, bool am)
 #endif
    }
    present_top();
+   return true;
 }
 
 int main(void)
@@ -1790,7 +1838,8 @@ int main(void)
       bool act = false;
 
       hidScanInput();
-      k = hidKeysDown() | (hidKeysDownRepeat() & (KEY_DUP | KEY_DDOWN | KEY_DLEFT | KEY_DRIGHT));
+      k = hidKeysDown() | (hidKeysDownRepeat() & (KEY_DUP | KEY_DDOWN | KEY_DLEFT | KEY_DRIGHT)) | preview_keys;
+      preview_keys = 0;
       count = tab == TAB_GAMES ? nentries : nicons;
       if (k & KEY_START)
          break;
@@ -1800,7 +1849,7 @@ int main(void)
       if (k & KEY_DLEFT) sel = sel > ROWS ? sel - ROWS : 0;
 
       /* touch: tabs, rows (tap the selected row again to use it) */
-      if (touched(&t))
+      if (touched(k, &t))
       {
          if (t.py >= TAB_Y && t.py < TAB_Y + TAB_H)
             k |= t.px < UI_W / 2 ? (tab == TAB_ICONS ? KEY_L : 0) : (tab == TAB_GAMES ? KEY_R : 0);
@@ -1922,7 +1971,9 @@ int main(void)
       /* the top preview, once the selection stops moving */
       if (top_wait && !--top_wait)
       {
-         draw_top_for(tab, sel, am);
+         /* stopped by a button: made again once the selection settles */
+         if (!draw_top_for(tab, sel, am))
+            top_wait = preview_wait(tab, sel);
          draw_bottom(tab, sel, top);       /* the canvas is shared: draw it back */
          ui_present();
       }

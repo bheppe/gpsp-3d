@@ -13,6 +13,10 @@
 uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
                     int *w, int *h, int *interlaced, uint32_t *mem);
 
+/* If set, called every 16 rows: when it returns nonzero, png_shrink() stops
+ * and returns NULL (Icon Maker: a button pressed while a big PNG is read). */
+extern int (*png_shrink_stop)(void);
+
 /* Timing (Icon Maker's TIMING build): set png_shrink_clock to a clock and
  * the last png_shrink() adds up, in its ticks, the time spent reading the
  * file, in libpng's png_read_row() (reading included) and averaging rows. */

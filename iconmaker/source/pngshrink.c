@@ -5,6 +5,7 @@
 #include <png.h>
 #include "pngshrink.h"
 
+int (*png_shrink_stop)(void);
 uint64_t (*png_shrink_clock)(void);
 uint64_t png_shrink_read_ticks, png_shrink_rows_ticks, png_shrink_average_ticks;
 
@@ -99,24 +100,33 @@ uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
    {
       const uint8_t *p = row;
       uint32_t *a = acc;
-      uint64_t t = clock_now();
+      uint64_t t;
+      if (png_shrink_stop && !(y & 15) && png_shrink_stop())
+         png_error(png, "stopped");
+      t = clock_now();
       png_read_row(png, row, NULL);
       png_shrink_rows_ticks += clock_now() - t;
       t = clock_now();
-      /* colour weighted by alpha, so see-through edges don't darken; a
-       * counter instead of x / fac (the 3DS's CPU has no divide) */
-      for (x = 0, k = 0; x < pw; x++, p += 4)
+      /* each block of fac pixels summed in registers, then added to its
+       * column once; colour weighted by alpha, so see-through edges don't
+       * darken (and no x / fac: the 3DS's CPU has no divide) */
+      for (x = 0; x < pw; x += k, a += 5)
       {
-         a[0] += p[0] * p[3];
-         a[1] += p[1] * p[3];
-         a[2] += p[2] * p[3];
-         a[3] += p[3];
-         a[4]++;
-         if (++k == fac)
+         uint32_t r = 0, g = 0, b = 0, al = 0, i;
+         k = pw - x < fac ? pw - x : fac;
+         for (i = 0; i < k; i++, p += 4)
          {
-            k = 0;
-            a += 5;
+            uint32_t pa = p[3];
+            r += p[0] * pa;
+            g += p[1] * pa;
+            b += p[2] * pa;
+            al += pa;
          }
+         a[0] += r;
+         a[1] += g;
+         a[2] += b;
+         a[3] += al;
+         a[4] += k;
       }
       if ((y + 1) % fac == 0 || y + 1 == ph)
       {
