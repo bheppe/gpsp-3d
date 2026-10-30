@@ -7,7 +7,8 @@ The HOME Menu turns a 3D banner's whole model about the vertical axis. The
 model is a tile with the game's icon on both faces, bobbing a little, and
 under it the game's name on a strip that always faces the camera. Icon Maker
 swaps in two pictures for each game:
-  LABEL  128x128 RGB565 both faces of the tile: the game's icon
+  LABEL  128x128 RGBA4  both faces of the tile: the game's icon, corners
+                        cut round by transparency
   NAME   256x64  RGBA4  the name strip (transparent around the text)
 Both start as noise, so the compressed model always has room for any picture.
 
@@ -27,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "..", "res")
 
 # ---- layout (the HOME Menu shows about y -8..9; it turns the model about x = 0) ----
-TILE_W, TILE_D = 9.5, 1.4                  # the tile: face, depth
+TILE_W, TILE_D = 9.5, 0.9                  # the tile: face, depth
 CORNER, CORNER_SEG = 0.2, 6                # corner radius (of the width), points per corner
 TILE_Y = 3.6                               # its centre
 NAME_W, NAME_Y = 26.0, -7.9                # the name strip: width, bottom edge (height = width / 4)
@@ -158,7 +159,7 @@ def square_tile(b):
     return b.prim([front, rear], 0), b.prim(sides, 1)
 
 
-def make_gltf(animated=True, rounded=True):
+def make_gltf(animated=True, rounded=False):
     """The HOME Menu turns a 3D banner's whole model about the vertical axis
     (and shows roughly y -8..9 of it). So: a tile with the game's icon on both
     faces, centred on that axis, bobbing a little; and under it the name, on a
@@ -198,7 +199,10 @@ def make_gltf(animated=True, rounded=True):
         "meshes": [{"name": "Tile", "primitives": [faces, body]},
                    {"name": "Name", "primitives": [name]}],
         "materials": [
-            {"name": "Label", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0}},
+            # the icon's corners are cut round by its transparency (a rounded
+            # outline in the model froze the HOME Menu once animated)
+            {"name": "Label", "alphaMode": "MASK", "alphaCutoff": 0.5,
+             "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0}},
             {"name": "Body", "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}, "metallicFactor": 0}},
             {"name": "NameText", "alphaMode": "MASK", "alphaCutoff": 0.5, "doubleSided": True,
              "pbrMetallicRoughness": {"baseColorTexture": {"index": 2}, "metallicFactor": 0}},
@@ -300,9 +304,9 @@ def convert(pycgfx_dir, gltf, out, rgb565=True):
     _label_fmt = TextureFormat.RGB565 if rgb565 else TextureFormat.RGBA4
     to_txob = pycgfx.swizzler.to_txob
     if not getattr(to_txob, "patched", False):
-        # the icon and the tile's sides are opaque: RGB565 shows smoother
-        # colours than RGBA4; the name strip needs RGBA4's transparency
-        f = lambda im: to_txob(im, TextureFormat.RGBA4 if im.size == (256, 64) else _label_fmt)
+        # the tile's sides are opaque: RGB565; the icon (round corners) and
+        # the name strip need RGBA4's transparency
+        f = lambda im: to_txob(im, TextureFormat.RGBA4 if im.size in ((256, 64), (128, 128)) else _label_fmt)
         f.patched = True
         pycgfx.swizzler.to_txob = f
     with tempfile.TemporaryDirectory() as tmp:
@@ -341,16 +345,35 @@ def _put_texture(cgfx, w, h, png):
         if i % 4 == 0 and struct.unpack_from("<2I", cgfx, i + 0x14) == (h, w) and fmt in (3, 4):
             break
     off = i + 0x44 + struct.unpack_from("<i", cgfx, i + 0x44)[0]
+    if (w, h) == (128, 128):
+        im = rounded_alpha(im)
     px = im.load()
+    bayer = ((0, 8, 2, 10), (12, 4, 14, 6), (3, 11, 1, 9), (15, 7, 13, 5))
     for y in range(h):
         for x in range(w):
             r, g, b, a = px[x, h - 1 - y]
+            d = bayer[y & 3][x & 3]
             if fmt == 3:
                 v = (r * 31 + 127) // 255 << 11 | (g * 63 + 127) // 255 << 5 | (b * 31 + 127) // 255
             else:
-                v = (r * 15 + 127) // 255 << 12 | (g * 15 + 127) // 255 << 8 | (b * 15 + 127) // 255 << 4 | \
-                    (a * 15 + 127) // 255
+                q = lambda c: min(15, (c * 15 + d * 16) // 255)
+                v = q(r) << 12 | q(g) << 8 | q(b) << 4 | (a * 15 + 127) // 255
             struct.pack_into("<H", cgfx, off + (((y // 8) * (w // 8) + x // 8) * 64 + _zo(x & 7, y & 7)) * 2, v)
+
+
+def rounded_alpha(im):
+    """The icon on the tile: opaque inside a square with rounded corners
+    (radius CORNER of the width), transparent outside."""
+    from PIL import Image, ImageDraw
+    w, h = im.size
+    k = 4
+    m = Image.new("L", (w * k, h * k), 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, w * k - 1, h * k - 1), int(w * k * CORNER), fill=255)
+    m = m.resize((w, h), Image.LANCZOS)
+    out = Image.new("RGBA", (w, h), (74, 79, 90, 255))
+    out.alpha_composite(im.convert("RGBA"))
+    out.putalpha(m)
+    return out
 
 
 def _lz11_stored(data):
@@ -392,11 +415,11 @@ def make_app_banners():
     gp = os.path.join(root, "gpsp3ds", "res")
     app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(gp, "banner3d-name.png"),
                os.path.join(gp, "banner3d-label.png"), jingle, os.path.join(gp, "banner3d.bnr"))
-    app_banner(os.path.join(RES, "test-square.cgfx"), os.path.join(RES, "banner3d-name.png"),
+    app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(RES, "banner3d-name.png"),
                os.path.join(RES, "banner3d-label.png"), jingle, os.path.join(RES, "banner3d-app.bnr"))
     snes = os.path.join(root, "..", "snes9x_3ds-pr2", "resources")
     if os.path.isfile(os.path.join(snes, "banner3d-name.png")):
-        app_banner(os.path.join(RES, "test-rgba4.cgfx"), os.path.join(snes, "banner3d-name.png"),
+        app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(snes, "banner3d-name.png"),
                    os.path.join(snes, "banner3d-label.png"), _cwav_of(os.path.join(snes, "banner.bnr")),
                    os.path.join(snes, "banner.bnr"))
 
@@ -412,9 +435,6 @@ def main():
     convert(pycgfx_dir, make_gltf(True), os.path.join(RES, "banner3d.cgfx"))
     # the same without the sway, in case an animated banner gives trouble
     convert(pycgfx_dir, make_gltf(False), os.path.join(RES, "banner3d-still.cgfx"))
-    # test models, each with one change from what's known to work on hardware
-    convert(pycgfx_dir, make_gltf(True), os.path.join(RES, "test-rgba4.cgfx"), rgb565=False)
-    convert(pycgfx_dir, make_gltf(True, rounded=False), os.path.join(RES, "test-square.cgfx"))
     make_app_banners()
 
 

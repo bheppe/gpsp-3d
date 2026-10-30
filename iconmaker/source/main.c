@@ -561,15 +561,20 @@ static void make_art(const char *path, int sys, game_art *a)
       name_strip(a->title, sys, a->name);
       image_fit(icon_png ? icon_png : a->icon48, iw, ih, a->label, 128, 128);
       {
-         /* see-through parts take the tile's grey (make_banner3d.py's Body) */
+         /* see-through parts take the tile's grey (make_banner3d.py's Body);
+          * outside a square with rounded corners (radius 0.2 of the width,
+          * as make_banner3d.py's CORNER) it's transparent: the corners cut round */
          int i, k;
          static const u8 body[3] = { 0x4A, 0x4F, 0x5A };
          for (i = 0; i < 128 * 128; i++)
          {
             u8 *q = a->label + i * 4;
+            int x = i % 128, y = i / 128, r = 26, dx = 0, dy = 0;
             for (k = 0; k < 3; k++)
                q[k] = (u8)((q[k] * q[3] + body[k] * (255 - q[3])) / 255);
-            q[3] = 255;
+            if (x < r) dx = r - x; else if (x > 127 - r) dx = x - (127 - r);
+            if (y < r) dy = r - y; else if (y > 127 - r) dy = y - (127 - r);
+            q[3] = dx * dx + dy * dy > r * r ? 0 : 255;
          }
       }
    }
