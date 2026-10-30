@@ -54,9 +54,12 @@ What's been reported, what's done, and what's next. Reports come from
 | **Smoother guide scrolling** with flick (from Snes9x 3D) | cabjoy (Discord) | 🧪 |
 | **System → Credits**: gpSP's authors and contributors | bheppe | 🧪 |
 | **Icon Maker 0.1.4: accented letters** (Pokémon no longer shows "Pok??mon") | PJ_MJ (Discord) | 🧪 |
-| **Icon Maker 0.1.4: banner style** (SELECT): blue background, no background, or **3D pop-out with a jingle** (the icon floats out of the screen and sways) | PJ_MJ (Discord), bheppe | 🧪 3D needs testing |
-| **New app icons** so gpSP 3D and Snes9x 3D are easy to tell apart | TheBigMacWhopperGuy (Reddit) | 🔧 picking a design |
-| `OPT=-O3` test build of the app code (the core is already -O3) | Gaming4LifeDE (Discord) | 🔧 measure |
+| **Icon Maker 0.1.4: banner style** (SELECT): 3D (the default), blue background, or no background | PJ_MJ (Discord), bheppe | ✅ |
+| **New app icons** ("gp" and "s9x" monograms) so gpSP 3D and Snes9x 3D are easy to tell apart | TheBigMacWhopperGuy (Reddit) | ✅ |
+| **3D HOME Menu banners** for gpSP 3D, Icon Maker, Snes9x 3D and every game icon: the icon on a turning, bobbing tile, the name under it, a soft chime | bheppe | ✅ tested on Old 3DS |
+| **HOME button froze the 3DS** in v0.1.5 test builds (the bottom backlight kept a system service open) | bheppe | ✅ fixed before release |
+| **Profiler no longer writes to the SD card while playing** (it wrote every 5 s with Show stats on) | bheppe | 🧪 |
+| `OPT=-O3` test build of the app code (the core is already -O3) | Gaming4LifeDE (Discord) | ✅ measured on Mario Kart: no difference, stays -O2 |
 
 **Snes9x 3D v1.61-layers8: controls** ([snes9x_3ds](https://github.com/bheppe/snes9x_3ds))
 
@@ -66,7 +69,10 @@ What's been reported, what's done, and what's next. Reports come from
 | **True 1:1 integer scale** (No Stretch 1:1) | Finn (Discord) | ✅ |
 | **Two depth profiles per game**, switched with a hotkey (e.g. overworld vs battle in EarthBound) | Finn (Discord) | 🧪 |
 | **Guide viewer** on the bottom screen, like gpSP 3D's | cabjoy (Discord) | 🧪 |
-| Donkey Kong Country 2: outline glitch | margret (Discord) | 📋 needs investigating |
+| **Mario is Missing!** in the Recommended list | SWChris (Discord) | ✅ |
+| **New app icon, 3D banner and a soft chime** (replaces the startup sound) | bheppe | ✅ |
+| Donkey Kong Country 2: thin white outline behind characters against the sky | margret (Discord) | 📋 needs investigating |
+| Tiny Toon Adventures: Buster Busts Loose in the Recommended list (as Auto) | SWChris (Discord) | 📋 needs its CRC32 |
 
 **gpSP 3D v0.1.6: performance and updates**
 
@@ -90,6 +96,7 @@ What's been reported, what's done, and what's next. Reports come from
 | Plan | Status |
 |---|---|
 | Tilt the layers with the 3DS (parallax from the gyroscope) | 💤 |
+| Snes9x 3D: separate depths for high- and low-priority tiles of a layer (Earthworm Jim 2's flipped BG3) | 💤 SWChris (Discord) |
 | DS game forwarders in Icon Maker (nds-bootstrap) | 💤 |
 | Game library with RomM sync | 💤 Gaming4LifeDE |
 | **Genesis 3D** | 💤 next big project |

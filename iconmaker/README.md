@@ -10,8 +10,11 @@ in [Snes9x 3D](https://github.com/bheppe/snes9x_3ds).
 2. Optional: put a PNG next to a game with the same name (`Golf.gba` -> `Golf.png`),
    best square. It becomes the icon; without one the icon is a cartridge
    with the game's name on it, colored by the name. Making a game again replaces its icon.
-   Same for the top screen banner: `Golf.banner.png` (best 256x128; other sizes are
-   fitted). Without one, the banner is the icon, bigger, with the game's name.
+   The top screen banner is 3D by default: the icon on a rounded tile that turns and
+   bobs, the game's name under it, and a soft chime. SELECT on the Games tab switches
+   between that and a flat banner (blue, or no background), and the choice is saved.
+   A flat banner can come from `Golf.banner.png` (best 256x128; other sizes are
+   fitted); without one it's the icon, bigger, with the game's name.
 3. Open Icon Maker, pick the game, press A twice. Its icon appears on the HOME Menu
    and opens gpSP 3D straight into the game.
 
@@ -28,6 +31,11 @@ Needs custom firmware with signature patches (Luma3DS), as for any CIA.
 In the devkitPro MSYS2 shell: `./build-iconmaker.sh`. It builds the template
 forwarder (from `../gpsp3ds/forwarder`, title ID 000400000F3D0000, unencrypted)
 into `data/fwd_gpsp3d.bin`, then the app into `out/`.
+
+It also builds a second template with the 3D banner (`res/banner3d.cgfx` and
+`res/jingle.wav`, made by `tools/make_banner3d.py`, which also makes gpSP 3D's
+and Icon Maker's own 3D banners; it needs [pycgfx](https://github.com/skyfloogle/pycgfx),
+gltflib and Pillow: `python3 tools/make_banner3d.py /path/to/pycgfx`).
 
 How it works: `source/fwdcia.c` copies the template, gives it a title ID made from
 the game's path, writes the game's path into the forwarder's slot, sets the name

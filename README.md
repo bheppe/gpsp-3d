@@ -34,12 +34,20 @@ raise the 3D slider. No RetroArch needed.
 - **Touch menu** on the bottom screen with a live preview, save states with
   slots, auto frame skip, audio stretch when the game runs slow, and a stats
   panel.
-- **Gyro sensor** for WarioWare: Twisted, using the 3DS gyroscope.
+- **Gyro and tilt sensors**: the 3DS gyroscope for WarioWare: Twisted, the
+  accelerometer for Yoshi Topsy-Turvy and Koro Koro Puzzle Happy Panechu.
+- **A calm bottom screen while you play**: the game's name and "Tap the screen
+  for the menu", or the performance stats, or the backlight off after 10 s
+  (**System -> Bottom screen**).
+- **No SD card writes while playing.** The log and the profiler keep what
+  they write in memory until the menu opens or the game closes.
 - **Forwarder support.** Started with a ROM path as its first argument, the
   app plays that game directly and closes when you quit.
 - **Screen effects**: Scanlines and LCD grid (Display -> Screen effect).
 - **HOME Menu icons per game** (forwarders), made right on the 3DS with
-  **Icon Maker** (GBA and SNES games), or on a PC. See below.
+  **Icon Maker** (GBA and SNES games), or on a PC. Their banner is 3D: the
+  game's icon on a turning tile that comes out of the screen, its name under
+  it, and a soft chime. See below.
 - **Game guides on the bottom screen** while you play (a `.txt` next to the
   game).
 - **Fast forward** (Y) and **zipped games**.
@@ -127,7 +135,10 @@ in the store.
   scaling, color), **3D** (effect, strength, layer style, per-layer depths,
   sprite pop, focus, floor tilt, smart layers), **Speed** (frame skip, audio when slow,
   fast forward, stats) and **System** (core 2 drawing, GPU display, core 2 priority,
-  and **Save file**: where the current game's save is).
+  **Real-time clock** (Auto / On / Off; On for Pokemon hacks whose clock isn't found),
+  **Startup** (skip or play the GBA intro, which needs your own `gba_bios.bin` in
+  `sdmc:/3ds/gpsp3d/`), **Bottom screen** (Simple / Performance / Off after 10 s),
+  **Save file** (where the current game's save is) and **Credits**).
 - **3D:** raise the 3DS 3D slider. **3D tab -> Strength** scales the effect.
   **3D tab -> Layer style** picks a preset. **3D tab -> Settings for** chooses
   whether changes apply to all games or only this one.
@@ -179,11 +190,16 @@ Nintendo cartridge icon.
 3. **My icons** (R, or tap the tab) lists the icons you've made; **X** deletes
    one (the game file stays).
 
-Without any pictures, a game gets a cartridge icon with its name on the label
-and a banner with the icon and its name. To use your own, put them next to the
-game: `Pokemon Emerald.png` for the icon (any size, best square) and
-`Pokemon Emerald.banner.png` for the banner (best 256x128). Making a game again
-replaces its icon. More in [iconmaker/README.md](iconmaker/README.md).
+The banner is 3D by default: the game's icon on a rounded tile that turns and
+bobs in front of the HOME Menu's theme, the game's name under it, and a soft
+chime. **SELECT** on the Games tab switches to a flat banner (gpSP 3D's blue, or
+no background) and back; the bottom screen shows which is on.
+
+Without any pictures, a game gets a cartridge icon with its name on the label.
+To use your own, put them next to the game: `Pokemon Emerald.png` for the icon
+(any size, best square; it's also what goes on the 3D tile) and
+`Pokemon Emerald.banner.png` for a flat banner (best 256x128). Making a game
+again replaces its icon. More in [iconmaker/README.md](iconmaker/README.md).
 
 ### On a PC: make-forwarders.sh
 
@@ -280,6 +296,11 @@ Bug reports and game test results help just as much. Post them under
   file, the 3DS app binary as a whole is distributed under GPL-3.0.
 - UI font: [Inter](https://rsms.me/inter/) by Rasmus Andersson, SIL Open Font
   License 1.1 (`gpsp3ds/res/Inter-LICENSE.txt`).
+- The 3D banner model is made by `iconmaker/tools/make_banner3d.py` with
+  [pycgfx](https://github.com/skyfloogle/pycgfx) by skyfloogle (glTF to CGFX;
+  run on a PC, not part of the apps). The fixes that make such a model work on
+  the real HOME Menu follow [ClouDS Music FA](https://github.com/Epic0522/ClouDS-Music-FA)'s
+  and [ftb](https://github.com/fosterbarnes/ftb)'s banner converters.
 
 Game Boy Advance and Nintendo 3DS are trademarks of Nintendo. This project is
 not affiliated with or endorsed by Nintendo.
