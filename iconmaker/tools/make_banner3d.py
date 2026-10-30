@@ -70,6 +70,14 @@ class Builder:
         self.accessors.append(acc)
         return len(self.accessors) - 1
 
+    def prim_raw(self, pos, nrm, uvs, idx, material):
+        p = self.add(b"".join(struct.pack("<3f", *v) for v in pos), 5126, "VEC3", len(pos), 34962,
+                     ([min(v[i] for v in pos) for i in range(3)], [max(v[i] for v in pos) for i in range(3)]))
+        n = self.add(b"".join(struct.pack("<3f", *v) for v in nrm), 5126, "VEC3", len(nrm), 34962)
+        t = self.add(b"".join(struct.pack("<2f", *v) for v in uvs), 5126, "VEC2", len(uvs), 34962)
+        i = self.add(b"".join(struct.pack("<H", v) for v in idx), 5123, "SCALAR", len(idx), 34963)
+        return {"attributes": {"POSITION": p, "NORMAL": n, "TEXCOORD_0": t}, "indices": i, "material": material}
+
     def prim(self, quads, material, uv=True):
         pos, nrm, uvs, idx = [], [], [], []
         for verts, n, *t in quads:
@@ -100,40 +108,68 @@ def _outline():
     return pts
 
 
-def rounded_faces():
-    """Front and back of the tile, each a fan of triangles (as quads with a
-    repeated corner) from the centre; the icon fills the square, the corners
-    are cut round. The back is mirrored so the icon reads from behind too."""
-    pts, z, quads = _outline(), TILE_D / 2, []
-    uv = lambda x, y, flip: ((-x if flip else x) / TILE_W + 0.5, 0.5 - y / TILE_W)
-    for i in range(len(pts)):
-        (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % len(pts)]
-        quads.append(([(0, 0, z), (x0, y0, z), (x1, y1, z), (x1, y1, z)], (0, 0, 1),
-                      [uv(0, 0, 0), uv(x0, y0, 0), uv(x1, y1, 0), uv(x1, y1, 0)]))
-        quads.append(([(0, 0, -z), (x1, y1, -z), (x0, y0, -z), (x0, y0, -z)], (0, 0, -1),
-                      [uv(0, 0, 1), uv(x1, y1, 1), uv(x0, y0, 1), uv(x0, y0, 1)]))
-    return quads
+def rounded_faces(b, material):
+    """Front and back of the tile: each a fan of triangles from its centre,
+    sharing vertices; the icon fills the square, the corners are cut round.
+    The back is mirrored so the icon reads from behind too."""
+    pts, z = _outline(), TILE_D / 2
+    pos, nrm, uvs, idx = [], [], [], []
+    for side, nz in ((0, 1), (1, -1)):
+        base = len(pos)
+        for x, y in [(0, 0)] + pts:
+            pos.append((x, y, z * nz))
+            nrm.append((0, 0, nz))
+            uvs.append(((-x if side else x) / TILE_W + 0.5, 0.5 - y / TILE_W))
+        n = len(pts)
+        for i in range(n):
+            a, c = base + 1 + i, base + 1 + (i + 1) % n
+            idx += [base, a, c] if nz > 0 else [base, c, a]
+    return b.prim_raw(pos, nrm, uvs, idx, material)
 
 
-def rounded_sides():
-    pts, z, quads = _outline(), TILE_D / 2, []
-    for i in range(len(pts)):
-        (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % len(pts)]
-        nx, ny = y1 - y0, x0 - x1
-        l = math.hypot(nx, ny) or 1
-        quads.append(([(x0, y0, -z), (x1, y1, -z), (x1, y1, z), (x0, y0, z)], (nx / l, ny / l, 0)))
-    return quads
+def rounded_sides(b, material):
+    """The rim: one band of quads around the outline, normals pointing out."""
+    pts, z = _outline(), TILE_D / 2
+    pos, nrm, uvs, idx = [], [], [], []
+    n = len(pts)
+    for x, y in pts:
+        l = math.hypot(x, y) or 1
+        for zz in (-z, z):
+            pos.append((x, y, zz))
+            nrm.append((x / l, y / l, 0))
+            uvs.append((0.5, 0.5))
+    for i in range(n):
+        a0, a1 = 2 * i, 2 * ((i + 1) % n)
+        idx += [a0, a1, a1 + 1, a0, a1 + 1, a0 + 1]
+    return b.prim_raw(pos, nrm, uvs, idx, material)
 
 
-def make_gltf(animated=True):
+def square_tile(b):
+    """The first design that worked on hardware: a plain box."""
+    x, y, z = TILE_W / 2, TILE_W / 2, TILE_D / 2
+    front = ([(-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)], (0, 0, 1), [(0, 1), (1, 1), (1, 0), (0, 0)])
+    rear = ([(x, -y, -z), (-x, -y, -z), (-x, y, -z), (x, y, -z)], (0, 0, -1), [(0, 1), (1, 1), (1, 0), (0, 0)])
+    sides = [
+        ([(x, -y, z), (x, -y, -z), (x, y, -z), (x, y, z)], (1, 0, 0)),
+        ([(-x, -y, -z), (-x, -y, z), (-x, y, z), (-x, y, -z)], (-1, 0, 0)),
+        ([(-x, y, z), (x, y, z), (x, y, -z), (-x, y, -z)], (0, 1, 0)),
+        ([(-x, -y, -z), (x, -y, -z), (x, -y, z), (-x, -y, z)], (0, -1, 0)),
+    ]
+    return b.prim([front, rear], 0), b.prim(sides, 1)
+
+
+def make_gltf(animated=True, rounded=True):
     """The HOME Menu turns a 3D banner's whole model about the vertical axis
     (and shows roughly y -8..9 of it). So: a tile with the game's icon on both
     faces, centred on that axis, bobbing a little; and under it the name, on a
     strip that always faces the camera (a Y-axis billboard, set after
     conversion), so it stays readable while the tile turns."""
     b = Builder()
-    faces = b.prim(rounded_faces(), 0)
-    body = b.prim(rounded_sides(), 1)      # textured too: a material without one crashes the HOME Menu
+    if rounded:
+        faces, body = rounded_faces(b, 0), rounded_sides(b, 1)
+    else:
+        faces, body = square_tile(b)
+    # (the body is textured too: a material without one crashes the HOME Menu)
     # the name strip: 4:1 like its 256x64 picture, its place baked into the vertices
     nx0, nx1, ny0, ny1 = -NAME_W / 2, NAME_W / 2, NAME_Y, NAME_Y + NAME_W / 4
     name = b.prim([([(nx0, ny0, 0), (nx1, ny0, 0), (nx1, ny1, 0), (nx0, ny1, 0)], (0, 0, 1),
@@ -255,16 +291,18 @@ def hardware_fixes(cgfx):
         m.fragment_shader.fragment_lighting_table.distribution_0_sampler = None
 
 
-def convert(pycgfx_dir, gltf, out):
+def convert(pycgfx_dir, gltf, out, rgb565=True):
     sys.path.insert(0, pycgfx_dir)
     import gltflib
     import main as pycgfx
     from cgfx.txob import TextureFormat
+    global _label_fmt
+    _label_fmt = TextureFormat.RGB565 if rgb565 else TextureFormat.RGBA4
     to_txob = pycgfx.swizzler.to_txob
     if not getattr(to_txob, "patched", False):
         # the icon and the tile's sides are opaque: RGB565 shows smoother
         # colours than RGBA4; the name strip needs RGBA4's transparency
-        f = lambda im: to_txob(im, TextureFormat.RGBA4 if im.size == (256, 64) else TextureFormat.RGB565)
+        f = lambda im: to_txob(im, TextureFormat.RGBA4 if im.size == (256, 64) else _label_fmt)
         f.patched = True
         pycgfx.swizzler.to_txob = f
     with tempfile.TemporaryDirectory() as tmp:
@@ -354,11 +392,11 @@ def make_app_banners():
     gp = os.path.join(root, "gpsp3ds", "res")
     app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(gp, "banner3d-name.png"),
                os.path.join(gp, "banner3d-label.png"), jingle, os.path.join(gp, "banner3d.bnr"))
-    app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(RES, "banner3d-name.png"),
+    app_banner(os.path.join(RES, "test-square.cgfx"), os.path.join(RES, "banner3d-name.png"),
                os.path.join(RES, "banner3d-label.png"), jingle, os.path.join(RES, "banner3d-app.bnr"))
     snes = os.path.join(root, "..", "snes9x_3ds-pr2", "resources")
     if os.path.isfile(os.path.join(snes, "banner3d-name.png")):
-        app_banner(os.path.join(RES, "banner3d.cgfx"), os.path.join(snes, "banner3d-name.png"),
+        app_banner(os.path.join(RES, "test-rgba4.cgfx"), os.path.join(snes, "banner3d-name.png"),
                    os.path.join(snes, "banner3d-label.png"), _cwav_of(os.path.join(snes, "banner.bnr")),
                    os.path.join(snes, "banner.bnr"))
 
@@ -374,6 +412,9 @@ def main():
     convert(pycgfx_dir, make_gltf(True), os.path.join(RES, "banner3d.cgfx"))
     # the same without the sway, in case an animated banner gives trouble
     convert(pycgfx_dir, make_gltf(False), os.path.join(RES, "banner3d-still.cgfx"))
+    # test models, each with one change from what's known to work on hardware
+    convert(pycgfx_dir, make_gltf(True), os.path.join(RES, "test-rgba4.cgfx"), rgb565=False)
+    convert(pycgfx_dir, make_gltf(True, rounded=False), os.path.join(RES, "test-square.cgfx"))
     make_app_banners()
 
 
