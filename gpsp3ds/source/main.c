@@ -1501,9 +1501,19 @@ static char   log_buf[8192];
 static size_t log_len;
 static u32    log_dropped;
 
+/* the core's profiler (gpsp_profile.txt) keeps its reports in memory too
+ * (profiler.c; the core is built with PROFILE=1) */
+extern bool prof_defer_log;
+void prof_flush_log(void);
+void prof_log_line(const char *line);
+#ifndef GPSP3D_OPT
+#define GPSP3D_OPT "-O2"
+#endif
+
 static void log_flush(void)
 {
    FILE *f;
+   prof_flush_log();
    if (!log_len && !log_dropped)
       return;
    f = fopen(APP_DIR "/gpsp3d.log", "a");
@@ -2204,6 +2214,11 @@ static bool game_load(void)
    sram_load();
    profile_load_fwd();
    guide_open(rom_path, rom_name, APP_DIR);
+   {
+      char line[400];
+      snprintf(line, sizeof(line), "--- gpSP 3D %s, app code %s, %s", GPSP3D_VERSION, GPSP3D_OPT, rom_name);
+      prof_log_line(line);
+   }
    log_flush();   /* warnings from loading, before the game starts */
    return true;
 }
@@ -3566,6 +3581,7 @@ int main(int argc, char **argv)
    aptHookCookie cookie;
    bool dynarec;
 
+   prof_defer_log = true;   /* no SD writes from the profiler while playing */
    gfxInit(GSP_RGB565_OES, GSP_RGB565_OES, false);
    gfxSetDoubleBuffering(GFX_TOP, true);
    gfxSetDoubleBuffering(GFX_BOTTOM, true);

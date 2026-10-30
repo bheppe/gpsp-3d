@@ -4,7 +4,8 @@
  * option "Profiler overlay". Every 60 frames it shows one line of average
  * milliseconds per frame as an on-screen message, and appends a detailed
  * report (incl. the hottest guest PCs and the code around them, for finding
- * busy-wait loops) to gpsp_profile.txt in the save directory.
+ * busy-wait loops) to gpsp_profile.txt in the save directory (or, with
+ * prof_defer_log, keeps it in memory until prof_flush_log()).
  */
 #ifndef GPSP_PROFILER_H
 #define GPSP_PROFILER_H
@@ -47,6 +48,10 @@ void prof_mark_audio_done(void);
 void prof_frame_end(void);
 void prof_reset(void);
 void prof_init(void *environ_cb);
+/* reports kept in memory until prof_flush_log() when prof_defer_log is set */
+extern bool prof_defer_log;
+void prof_flush_log(void);
+void prof_log_line(const char *line);
 
 #define PROF_BEGIN(var)   prof_t var = prof_enabled ? prof_now() : 0
 #define PROF_END(var, acc) do { if (prof_enabled) acc += prof_now() - var; } while (0)

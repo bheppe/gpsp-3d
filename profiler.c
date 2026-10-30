@@ -5,6 +5,7 @@
 #include <string.h>
 #include "common.h"
 #include "libretro.h"
+#include <stdarg.h>
 #include "profiler.h"
 
 #ifdef _3DS
@@ -141,24 +142,68 @@ static bool code_region(u32 addr)
    return r == 0x02 || r == 0x03 || (r >= 0x08 && r <= 0x0D);
 }
 
+/* The report goes to a buffer in memory; prof_flush_log() writes it to
+ * gpsp_profile.txt. A frontend that sets prof_defer_log calls that only at
+ * safe moments (gpSP 3D: when its menu opens or the game closes), so the
+ * profiler never writes to the SD card while the game runs (on the 3DS that
+ * could stall or freeze a game). If the buffer fills, later reports are
+ * dropped until the next flush. */
+bool prof_defer_log = false;
+static char plog[24 * 1024];
+static size_t plog_len;
+
+static void pf(const char *fmt, ...)
+{
+   va_list ap;
+   int n;
+   if (plog_len >= sizeof(plog) - 1)
+      return;
+   va_start(ap, fmt);
+   n = vsnprintf(plog + plog_len, sizeof(plog) - plog_len, fmt, ap);
+   va_end(ap);
+   if (n < 0)
+      return;
+   plog_len += (size_t)n;
+   if (plog_len >= sizeof(plog))
+      plog_len = sizeof(plog) - 1;
+}
+
+/* a line from the frontend into the report (e.g. which build this is) */
+void prof_log_line(const char *line)
+{
+   pf("%s\n", line);
+}
+
+void prof_flush_log(void)
+{
+   FILE *f;
+   if (!plog_len || !log_path[0] || !(f = fopen(log_path, "a")))
+   {
+      plog_len = 0;
+      return;
+   }
+   fwrite(plog, 1, plog_len, f);
+   fclose(f);
+   plog_len = 0;
+}
+
 static void write_log(float cpu, float gfx, float snd, float jit,
       float out, float aud, float wait, u32 halt_pct)
 {
-   FILE *f;
    u32 i, n, j;
    u32 idx[PROF_HOT_REPORT];
    u32 code = read_memory32(0x080000AC);
 
-   if (!log_path[0] || !(f = fopen(log_path, "a")))
+   if (!log_path[0])
       return;
 
    if (windows == PROF_LOG_EVERY)
-      fprintf(f, "=== gpSP profile, game code %.4s ===\n"
+      pf("=== gpSP profile, game code %.4s ===\n"
                  "ms per frame (16.7 = full speed): cpu = GBA CPU emulation (excl. gfx/snd/jit), "
                  "gfx = GBA drawing, snd = sound, jit = dynarec translation, out = video_cb, "
                  "aud = audio_cb, wait = outside the core\n", (const char*)&code);
 
-   fprintf(f, "cpu %.2f gfx %.2f snd %.2f jit %.2f | out %.2f aud %.2f wait %.2f | "
+   pf("cpu %.2f gfx %.2f snd %.2f jit %.2f | out %.2f aud %.2f wait %.2f | "
               "halt %u%% ramflush %u romflush %u rampages %u reused %u | vram code %.2f smc %.2f (part of cpu)\n",
          cpu, gfx, snd, jit, out, aud, wait, halt_pct,
          prof_ram_flushes, prof_rom_flushes, prof_ram_pages, prof_ram_reused, last_vram, last_smc);
@@ -167,14 +212,14 @@ static void write_log(float cpu, float gfx, float snd, float jit,
     * code, and how much RAM code there was to throw away */
    if (flush_log_total)
    {
-      fprintf(f, "  ram flushes in the last %u frames: %u (store %u, dma %u, vram %u, full %u)\n",
+      pf("  ram flushes in the last %u frames: %u (store %u, dma %u, vram %u, full %u)\n",
             PROF_WINDOW * PROF_LOG_EVERY, flush_log_total,
             flush_by_cause[PROF_FL_STORE], flush_by_cause[PROF_FL_DMA],
             flush_by_cause[PROF_FL_VRAM], flush_by_cause[PROF_FL_FULL]);
       for (i = 0; i < PROF_FLUSH_SRC && flush_src[i].count; i++)
       {
          u32 pc = flush_src[i].key & ~1U, thumb = flush_src[i].key & 1, a;
-         fprintf(f, "  flush (%s, addr %08X) at %08X %s x%u, iwram code %X-%X ewram code %X-%X:",
+         pf("  flush (%s, addr %08X) at %08X %s x%u, iwram code %X-%X ewram code %X-%X:",
                flush_cause_name[flush_src[i].cause], flush_src[i].addr,
                pc, thumb ? "T" : "A", flush_src[i].count,
                flush_src[i].iw_lo, flush_src[i].iw_hi, flush_src[i].ew_lo, flush_src[i].ew_hi);
@@ -182,15 +227,15 @@ static void write_log(float cpu, float gfx, float snd, float jit,
          {
             if (thumb)
                for (a = pc - 8; a < pc + 16; a += 2)
-                  fprintf(f, " %04X", read_memory16(a) & 0xFFFF);
+                  pf(" %04X", read_memory16(a) & 0xFFFF);
             else
                for (a = pc - 8; a < pc + 16; a += 4)
-                  fprintf(f, " %08X", read_memory32(a));
+                  pf(" %08X", read_memory32(a));
          }
-         fprintf(f, "\n");
+         pf("\n");
       }
       if (flush_src_other)
-         fprintf(f, "  flush from other places x%u\n", flush_src_other);
+         pf("  flush from other places x%u\n", flush_src_other);
       memset(flush_src, 0, sizeof(flush_src));
       memset(flush_by_cause, 0, sizeof(flush_by_cause));
       flush_src_other = flush_log_total = 0;
@@ -215,20 +260,21 @@ static void write_log(float cpu, float gfx, float snd, float jit,
    {
       u32 key = hot[idx[i]].key, pc = key & ~1U, thumb = key & 1;
       u32 pct = hot_total ? hot[idx[i]].count * 100 / hot_total : 0;
-      fprintf(f, "  hot %08X %s %u%%:", pc, thumb ? "T" : "A", pct);
+      pf("  hot %08X %s %u%%:", pc, thumb ? "T" : "A", pct);
       if (code_region(pc))
       {
          u32 a;
          if (thumb)
             for (a = pc - 8; a < pc + 24; a += 2)
-               fprintf(f, " %04X", read_memory16(a) & 0xFFFF);
+               pf(" %04X", read_memory16(a) & 0xFFFF);
          else
             for (a = pc - 8; a < pc + 24; a += 4)
-               fprintf(f, " %08X", read_memory32(a));
+               pf(" %08X", read_memory32(a));
       }
-      fprintf(f, "\n");
+      pf("\n");
    }
-   fclose(f);
+   if (!prof_defer_log)
+      prof_flush_log();
 }
 
 void prof_frame_end(void)
