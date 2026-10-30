@@ -13,4 +13,10 @@
 uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
                     int *w, int *h, int *interlaced, uint32_t *mem);
 
+/* Timing (Icon Maker's TIMING build): set png_shrink_clock to a clock and
+ * the last png_shrink() adds up, in its ticks, the time spent reading the
+ * file, in libpng's png_read_row() (reading included) and averaging rows. */
+extern uint64_t (*png_shrink_clock)(void);
+extern uint64_t png_shrink_read_ticks, png_shrink_rows_ticks, png_shrink_average_ticks;
+
 #endif

@@ -164,6 +164,18 @@ static void tm_log_start(void)
    tm_log(line);
 }
 
+/* a part of the step just marked, measured inside it (not added to the total) */
+static void tm_note(const char *what, u64 ticks)
+{
+   if (ntm < TM_MAX)
+   {
+      tm[ntm].what = what;
+      tm[ntm].us = tm_us(ticks);
+      tm[ntm].n = -1;
+      ntm++;
+   }
+}
+
 static void tm_log(const char *line)
 {
    FILE *f;
@@ -616,6 +628,12 @@ static u8 *load_picture(const char *game, const char *ext, int type, int min_w, 
       fseek(f, 0, SEEK_SET);
       img = png_shrink(f, min_w, min_h, PIC_MAX_SIDE, w, h, &interlaced, &mem);
       tm_mark(banner ? "banner: read + shrink PNG (libpng)" : "icon: read + shrink PNG (libpng)");
+#ifdef ICONMAKER_TIMING
+      /* in that: the SD card, libpng + zlib unpacking, our averaging */
+      tm_note("  of it: reading the SD card", png_shrink_read_ticks);
+      tm_note("  of it: libpng + zlib", png_shrink_rows_ticks - png_shrink_read_ticks);
+      tm_note("  of it: averaging rows", png_shrink_average_ticks);
+#endif
       if (!img && (!interlaced || *w > PIC_MAX_SIDE || *h > PIC_MAX_SIDE ||
                    (long long)*w * *h * 4 > PIC_MAX_FULL))
       {
@@ -1699,7 +1717,8 @@ static void draw_top_for(int tab, int sel, bool am)
          int i, y = 4, n;
          u32 total = 0;
          for (i = 0; i < ntm; i++)
-            total += tm[i].us;
+            if (tm[i].n > 0)                /* not the parts measured inside a step */
+               total += tm[i].us;
          ui_fill_alpha(130, 0, UI_W - 130, UI_H, C_BG, 230);
          snprintf(line, sizeof(line), "total %.0f ms", total / 1000.0);
          ui_text(&ui_font_bold, 136, y, line, C_WARN, 0);
@@ -1757,6 +1776,7 @@ int main(void)
    load_settings();
 #ifdef ICONMAKER_TIMING
    tm_log_start();
+   png_shrink_clock = svcGetSystemTick;
 #endif
    load_dir();
    read_dir();

@@ -5,6 +5,23 @@
 #include <png.h>
 #include "pngshrink.h"
 
+uint64_t (*png_shrink_clock)(void);
+uint64_t png_shrink_read_ticks, png_shrink_rows_ticks, png_shrink_average_ticks;
+
+static uint64_t clock_now(void)
+{
+   return png_shrink_clock ? png_shrink_clock() : 0;
+}
+
+/* libpng's reads, from the FILE (and timed) */
+static void read_data(png_structp png, png_bytep data, size_t len)
+{
+   uint64_t t = clock_now();
+   if (fread(data, 1, len, (FILE*)png_get_io_ptr(png)) != len)
+      png_error(png, "read error");
+   png_shrink_read_ticks += clock_now() - t;
+}
+
 /* the buffers, here so an error (a longjmp out of libpng) can free them */
 static uint8_t *row, *out;
 static uint32_t *acc;
@@ -28,6 +45,7 @@ uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
 
    *w = *h = *interlaced = 0;
    *mem = 0;
+   png_shrink_read_ticks = png_shrink_rows_ticks = png_shrink_average_ticks = 0;
    if (!info)
    {
       png_destroy_read_struct(&png, NULL, NULL);
@@ -39,7 +57,7 @@ uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
       png_destroy_read_struct(&png, &info, NULL);
       return NULL;
    }
-   png_init_io(png, f);
+   png_set_read_fn(png, f, read_data);
    /* no checksums, as stb_image: they cost time and only tell a damaged
     * file, which then shows damaged instead of not at all */
    png_set_crc_action(png, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
@@ -81,7 +99,10 @@ uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
    {
       const uint8_t *p = row;
       uint32_t *a = acc;
+      uint64_t t = clock_now();
       png_read_row(png, row, NULL);
+      png_shrink_rows_ticks += clock_now() - t;
+      t = clock_now();
       /* colour weighted by alpha, so see-through edges don't darken; a
        * counter instead of x / fac (the 3DS's CPU has no divide) */
       for (x = 0, k = 0; x < pw; x++, p += 4)
@@ -110,6 +131,7 @@ uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
          }
          memset(acc, 0, ow * 5 * sizeof(uint32_t));
       }
+      png_shrink_average_ticks += clock_now() - t;
    }
    img = out;
    out = NULL;
