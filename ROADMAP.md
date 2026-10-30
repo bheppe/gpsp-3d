@@ -50,7 +50,7 @@ What's been reported, what's done, and what's next. Reports come from
 | **System → Real-time clock**: Auto / On / Off, for Pokémon games whose clock the auto check misses | Individual_Emu673 (Reddit) | 🧪 |
 | **System → Startup**: the GBA BIOS intro, when `gba_bios.bin` is in `sdmc:/3ds/gpsp3d/` | Individual_Emu673 (Reddit) | 🧪 |
 | **Tilt sensor** for Yoshi Topsy-Turvy and Koro Koro Puzzle Happy Panechu, from the 3DS accelerometer | After-Pop-2000 (Reddit) | 🧪 needs the games |
-| **System → Bottom screen**: Always on / Dim after 10 s / Off after 10 s; a tap wakes it, the guide keeps it on | PJ_MJ (Discord) | 🧪 |
+| **System → Bottom screen**: Simple (a steady screen: the game's name, "Tap the screen for the menu"; the default) / Performance (the stats) / Off after 10 s (backlight off, a tap wakes it) | PJ_MJ (Discord) | 🧪 |
 | **Smoother guide scrolling** with flick (from Snes9x 3D) | cabjoy (Discord) | 🧪 |
 | **System → Credits**: gpSP's authors and contributors | bheppe | 🧪 |
 | **Icon Maker 0.1.4: accented letters** (Pokémon no longer shows "Pok??mon") | PJ_MJ (Discord) | 🧪 |

@@ -152,7 +152,7 @@ static int opt_ff_speed = 0;
 static bool ff_on;               /* toggle mode: fast forward is on */
 static int opt_rtc;           /* real-time clock: 0 Auto (the core decides), 1 On, 2 Off */
 static int opt_intro;         /* 1: start games with the GBA intro (needs the user's gba_bios.bin) */
-static int opt_bottom;        /* bottom screen while playing: 0 always on, 1 plain, 2 off (after 10 s) */
+static int opt_bottom;        /* bottom screen while playing: 0 simple, 1 performance stats, 2 off after 10 s */
 static int opt_slot;          /* save-state slot 0..9 */
 static int opt_smooth = 1;    /* scaling (GPU display): 0 Sharp, 1 Crisp, 2 Smooth */
 static int opt_crt;           /* screen effect (GPU display): 0 Off, 1 Scanlines, 2 LCD grid */
@@ -349,7 +349,7 @@ static void config_load(void)
          opt_rtc = clampi(atoi(eq), 0, 2);
       else if (!strcmp(line, "startup_intro"))
          opt_intro = atoi(eq) ? 1 : 0;
-      else if (!strcmp(line, "bottom_screen"))
+      else if (!strcmp(line, "bottom"))
          opt_bottom = clampi(atoi(eq), 0, 2);
       else if (!strcmp(line, "profiler"))
          opt_profiler = atoi(eq) ? 1 : 0;
@@ -413,7 +413,7 @@ static void config_save(void)
       return;
    fprintf(f, "last_dir=%s\nframe_skip=%d\nprofiler=%d\ncolor_style=%d\ncore2=%d\ndisplay=%d\ngpu=%d\n"
          "slot=%d\nscaling=%d\naudio_stretch=%d\ncore2_low_prio=%d\nsaturation=%d\nbrightness=%d\n3d_gap_fill=%d\nscreen_effect=%d\n"
-         "ff_toggle=%d\nff_speed=%d\nrtc=%d\nstartup_intro=%d\nbottom_screen=%d\n",
+         "ff_toggle=%d\nff_speed=%d\nrtc=%d\nstartup_intro=%d\nbottom=%d\n",
          cur_dir, opt_frameskip, opt_profiler, opt_colorcorr, opt_core2, opt_display, opt_gpu,
          opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill, opt_crt,
          opt_ff_toggle, opt_ff_speed, opt_rtc, opt_intro, opt_bottom);
@@ -1746,10 +1746,11 @@ static bool state_load(void)
    return n == state_size && retro_unserialize(state_buf, state_size);
 }
 
-/* Bottom screen while playing (System > Bottom screen): after 10 s without a
- * touch the stats screen gives way to a plain grey one ("Tap for stats and
- * menu"), or its backlight is turned off (saves battery). A tap wakes it; a
- * guide being read keeps it on. */
+/* Bottom screen while playing (System > Bottom screen): Simple, a steady
+ * screen with the game's name and "Tap for the menu"; Performance, the stats
+ * (speed, frame times, audio); or Off after 10 s, the simple screen whose
+ * backlight goes off after 10 s without a touch (saves battery; a tap wakes
+ * it). A guide being read keeps it on. */
 #define BOTTOM_IDLE_TICKS ((u64)(TICKS_PER_MS * 10000))
 static bool    bottom_asleep, bottom_lcd_off;
 
@@ -1773,13 +1774,19 @@ static void hud_show(void)
 {
    if (guide_shown || !hud_have || bottom_lcd_off)
       return;
-   if (bottom_asleep)
-   {
-      ui_clear(UI_RGB(0x1A, 0x1D, 0x24));
-      ui_text_center(&ui_font_body, UI_W / 2, UI_H / 2 - 10, "Tap for stats and menu", UI_RGB(0x6B, 0x74, 0x87));
-   }
-   else
+   if (opt_bottom == 1)
       scr_hud(&hud_last);
+   else
+   {
+      /* the simple screen */
+      ui_vgradient(0, 0, UI_W, UI_H, UI_RGB(0x1C, 0x1F, 0x2E), UI_RGB(0x0E, 0x11, 0x17));
+      ui_text_center(&ui_font_small, UI_W / 2, 14, "gpSP 3D", UI_RGB(0x4A, 0x52, 0x63));
+      if (ui_text_w(&ui_font_bold, rom_name) <= UI_W - 24)
+         ui_text_center(&ui_font_bold, UI_W / 2, 96, rom_name, UI_RGB(0xE6, 0xE9, 0xF0));
+      else
+         ui_text(&ui_font_bold, 12, 96, rom_name, UI_RGB(0xE6, 0xE9, 0xF0), UI_W - 24);
+      ui_text_center(&ui_font_body, UI_W / 2, 128, "Tap the screen for the menu", UI_RGB(0x8B, 0x94, 0xA7));
+   }
    ui_present();
 }
 
@@ -1799,14 +1806,12 @@ static void bottom_wake(void)
 
 static void bottom_check_idle(void)
 {
-   if (!opt_bottom || bottom_asleep || guide_shown ||
+   if (opt_bottom != 2 || bottom_asleep || guide_shown ||
        svcGetSystemTick() - bottom_idle_t0 < BOTTOM_IDLE_TICKS)
       return;
    bottom_asleep = true;
-   if (opt_bottom == 2 && lcd_backlight(false))
+   if (lcd_backlight(false))
       bottom_lcd_off = true;
-   else
-      hud_show();   /* the plain screen */
 }
 
 static void apt_hook(APT_HookType hook, void *param)
@@ -2634,13 +2639,13 @@ static void menu_build(int tab)
          mrows[mrow_n - 1].r.value = core2_result[0] ? core2_result : NULL;
          {
             static const char *const rtc_names[] = { "Auto", "On", "Off" };
-            static const char *const bottom_names[] = { "Always on", "Plain after 10 s", "Off after 10 s" };
+            static const char *const bottom_names[] = { "Simple", "Performance", "Off after 10 s" };
             mrow_choice(M_RTC, "Real-time clock", rtc_names[opt_rtc],
                   "On: for Pokemon hacks that say the internal\nbattery has run dry. Applies when a game starts.");
             mrow_choice(M_INTRO, "Startup", opt_intro ? "GBA intro" : "Skip intro",
                   "GBA intro needs your own gba_bios.bin in\nsdmc:/3ds/gpsp3d/. Applies when a game starts.");
             mrow_choice(M_BOTTOM, "Bottom screen", bottom_names[opt_bottom],
-                  "Plain: a grey screen. Off: backlight off.\nA tap wakes it. Stays on with a guide open.");
+                  "While playing. Performance: speed and timing.\nOff: backlight off after 10 s, a tap wakes it.");
          }
          if (save_path[0])
          {
