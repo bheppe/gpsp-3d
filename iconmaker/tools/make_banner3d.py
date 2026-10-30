@@ -232,7 +232,7 @@ def make_gltf(animated=True, rounded=False):
     return gltf
 
 
-def jingle_samples(rate=32730):
+def jingle_samples(rate=32000):
     """A short, soft chime (1.6 s): two sine-bell notes a fifth apart,
     slow to fade, with a gentle echo; quiet, so hovering over the icon is
     calm rather than loud."""
@@ -257,30 +257,36 @@ def jingle_samples(rate=32730):
 
 
 def make_jingle(path):
+    """The chime as a WAV, stereo like the banner sounds that play right."""
     rate, smp = jingle_samples()
     with wave.open(path, "wb") as w:
-        w.setnchannels(1)
+        w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(rate)
-        w.writeframes(b"".join(struct.pack("<h", v) for v in smp))
+        w.writeframes(b"".join(struct.pack("<hh", v, v) for v in smp))
 
 
 def make_cwav(path):
-    """The jingle as a CWAV (what a banner holds): PCM16 mono, laid out
-    like bannertool's."""
+    """The chime as a CWAV (what a banner holds): PCM16 stereo at 32 kHz,
+    laid out like the sound in Snes9x 3D's original banner, which plays
+    right. (A mono one played as a fast beeping on the HOME Menu.)"""
     rate, smp = jingle_samples()
+    n = len(smp)
     pcm = b"".join(struct.pack("<h", v) for v in smp)
-    data_size = 0x20 + len(pcm)
-    info = b"INFO" + struct.pack("<I", 0x40) + struct.pack("<BBH", 1, 0, 0) + struct.pack(
-        "<IIII", rate, 0, len(smp), 0) + struct.pack("<I", 1) + struct.pack("<HHi", 0x7100, 0, 0x0C) + \
-        struct.pack("<HHi", 0x1F00, 0, 0x18) + struct.pack("<HHi", 0, 0, -1) + struct.pack("<I", 0)
-    info += bytes(0x40 - len(info))
-    total = 0x40 + 0x40 + data_size
+    data_size = 0x20 + 2 * len(pcm)
+    info = b"INFO" + struct.pack("<I", 0x60) + struct.pack("<BBH", 1, 0, 0) + struct.pack(
+        "<IIII", rate, 0, n, 0) + struct.pack("<I", 2) + struct.pack("<HHi", 0x7100, 0, 0x14) + \
+        struct.pack("<HHi", 0x7100, 0, 0x28)
+    for ch in range(2):
+        info += struct.pack("<HHi", 0x1F00, 0, 0x18 + ch * len(pcm)) + struct.pack("<HHi", 0, 0, -1) + \
+            struct.pack("<I", 0)
+    info += bytes(0x60 - len(info))
+    total = 0x40 + 0x60 + data_size
     hdr = b"CWAV" + struct.pack("<HHII", 0xFEFF, 0x40, 0x02010000, total) + struct.pack("<HH", 2, 0) + \
-        struct.pack("<HHII", 0x7000, 0, 0x40, 0x40) + struct.pack("<HHII", 0x7001, 0, 0x80, data_size)
+        struct.pack("<HHII", 0x7000, 0, 0x40, 0x60) + struct.pack("<HHII", 0x7001, 0, 0xA0, data_size)
     hdr += bytes(0x40 - len(hdr))
     with open(path, "wb") as f:
-        f.write(hdr + info + b"DATA" + struct.pack("<I", data_size) + bytes(0x18) + pcm)
+        f.write(hdr + info + b"DATA" + struct.pack("<I", data_size) + bytes(0x18) + pcm + pcm)
 
 
 def hardware_fixes(cgfx):
