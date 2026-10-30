@@ -28,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "..", "res")
 
 # ---- layout (the HOME Menu shows about y -8..9; it turns the model about x = 0) ----
-TILE_W, TILE_D = 9.5, 0.6                  # the tile: face, depth
+TILE_W, TILE_D = 9.5, 0.4                  # the tile: face, depth
 CORNER, CORNER_SEG = 0.2, 6                # corner radius (of the width), points per corner
 TILE_Y = 3.6                               # its centre
 NAME_W, NAME_Y = 26.0, -7.9                # the name strip: width, bottom edge (height = width / 4)
@@ -146,20 +146,20 @@ def rounded_sides(b, material):
 
 
 def square_tile(b):
-    """The box that works on hardware: the two faces carry the icon (its
-    corners cut round by transparency), and the sides are set in by the
-    corner's depth, so their square corners stay inside the round outline
-    and it looks round from every angle. (Without sides, it froze.)"""
+    """The box that works on hardware. The two faces carry the icon, its
+    corners cut round by transparency. The sides run only along the straight
+    part of each edge, where the outline is, and stop where the round corner
+    starts, so no square corner shows when the tile turns. They're dark, so
+    the edge reads as a thin rim. (Without sides at all it froze.)"""
     x, y, z = TILE_W / 2, TILE_W / 2, TILE_D / 2
     front = ([(-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)], (0, 0, 1), [(0, 1), (1, 1), (1, 0), (0, 0)])
     rear = ([(x, -y, -z), (-x, -y, -z), (-x, y, -z), (x, y, -z)], (0, 0, -1), [(0, 1), (1, 1), (1, 0), (0, 0)])
-    k = x - TILE_W * CORNER * (1 - 1 / math.sqrt(2)) - 0.05   # inside the rounded corner
-    zi = z * 0.98
+    e = x - TILE_W * CORNER                    # where the straight part of an edge ends
     sides = [
-        ([(k, -k, zi), (k, -k, -zi), (k, k, -zi), (k, k, zi)], (1, 0, 0)),
-        ([(-k, -k, -zi), (-k, -k, zi), (-k, k, zi), (-k, k, -zi)], (-1, 0, 0)),
-        ([(-k, k, zi), (k, k, zi), (k, k, -zi), (-k, k, -zi)], (0, 1, 0)),
-        ([(-k, -k, -zi), (k, -k, -zi), (k, -k, zi), (-k, -k, zi)], (0, -1, 0)),
+        ([(x, -e, z), (x, -e, -z), (x, e, -z), (x, e, z)], (1, 0, 0)),
+        ([(-x, -e, -z), (-x, -e, z), (-x, e, z), (-x, e, -z)], (-1, 0, 0)),
+        ([(-e, y, z), (e, y, z), (e, y, -z), (-e, y, -z)], (0, 1, 0)),
+        ([(-e, -y, -z), (e, -y, -z), (e, -y, z), (-e, -y, z)], (0, -1, 0)),
     ]
     return b.prim([front, rear], 0), b.prim(sides, 1)
 
@@ -191,7 +191,7 @@ def make_gltf(animated=True, rounded=False):
     r_acc = b.add(struct.pack("<4f", 0, 0, 0, 1) * n, 5126, "VEC4", n)
     s_acc = b.add(struct.pack("<3f", 1, 1, 1) * n, 5126, "VEC3", n)
 
-    images = [("LABEL", noise_png(128, 128)), ("BODY", solid_png(8, 8, (74, 79, 90))),
+    images = [("LABEL", noise_png(128, 128)), ("BODY", solid_png(8, 8, (34, 36, 44))),
               ("NAME", noise_png(256, 64))]
     gltf = {
         "asset": {"version": "2.0", "generator": "gpSP 3D make_banner3d.py"},
