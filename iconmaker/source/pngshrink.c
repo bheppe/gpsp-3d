@@ -23,7 +23,7 @@ uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
 {
    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
    png_infop info = png ? png_create_info_struct(png) : NULL;
-   uint32_t pw, ph, ow, oh, fac, x, y;
+   uint32_t pw, ph, ow, oh, fac, x, y, k;
    uint8_t *img;
 
    *w = *h = *interlaced = 0;
@@ -40,6 +40,12 @@ uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
       return NULL;
    }
    png_init_io(png, f);
+   /* no checksums, as stb_image: they cost time and only tell a damaged
+    * file, which then shows damaged instead of not at all */
+   png_set_crc_action(png, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
+#ifdef PNG_IGNORE_ADLER32
+   png_set_option(png, PNG_IGNORE_ADLER32, PNG_OPTION_ON);
+#endif
    png_read_info(png, info);
    pw = png_get_image_width(png, info);
    ph = png_get_image_height(png, info);
@@ -73,17 +79,23 @@ uint8_t *png_shrink(FILE *f, int min_w, int min_h, int max_side,
 
    for (y = 0; y < ph; y++)
    {
+      const uint8_t *p = row;
+      uint32_t *a = acc;
       png_read_row(png, row, NULL);
-      for (x = 0; x < pw; x++)
+      /* colour weighted by alpha, so see-through edges don't darken; a
+       * counter instead of x / fac (the 3DS's CPU has no divide) */
+      for (x = 0, k = 0; x < pw; x++, p += 4)
       {
-         /* colour weighted by alpha, so see-through edges don't darken */
-         const uint8_t *p = row + x * 4;
-         uint32_t *a = acc + (x / fac) * 5;
          a[0] += p[0] * p[3];
          a[1] += p[1] * p[3];
          a[2] += p[2] * p[3];
          a[3] += p[3];
          a[4]++;
+         if (++k == fac)
+         {
+            k = 0;
+            a += 5;
+         }
       }
       if ((y + 1) % fac == 0 || y + 1 == ph)
       {
