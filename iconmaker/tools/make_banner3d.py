@@ -28,8 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "..", "res")
 
 # ---- layout (the HOME Menu shows about y -8..9; it turns the model about x = 0) ----
-TILE_W, TILE_D = 9.5, 0.12                 # the tile: face, gap between its two faces (no sides,
-                                           # so it stays round when it turns)
+TILE_W, TILE_D = 9.5, 0.6                  # the tile: face, depth
 CORNER, CORNER_SEG = 0.2, 6                # corner radius (of the width), points per corner
 TILE_Y = 3.6                               # its centre
 NAME_W, NAME_Y = 26.0, -7.9                # the name strip: width, bottom edge (height = width / 4)
@@ -147,15 +146,20 @@ def rounded_sides(b, material):
 
 
 def square_tile(b):
-    """The first design that worked on hardware: a plain box."""
+    """The box that works on hardware: the two faces carry the icon (its
+    corners cut round by transparency), and the sides are set in by the
+    corner's depth, so their square corners stay inside the round outline
+    and it looks round from every angle. (Without sides, it froze.)"""
     x, y, z = TILE_W / 2, TILE_W / 2, TILE_D / 2
     front = ([(-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)], (0, 0, 1), [(0, 1), (1, 1), (1, 0), (0, 0)])
     rear = ([(x, -y, -z), (-x, -y, -z), (-x, y, -z), (x, y, -z)], (0, 0, -1), [(0, 1), (1, 1), (1, 0), (0, 0)])
+    k = x - TILE_W * CORNER * (1 - 1 / math.sqrt(2)) - 0.05   # inside the rounded corner
+    zi = z * 0.98
     sides = [
-        ([(x, -y, z), (x, -y, -z), (x, y, -z), (x, y, z)], (1, 0, 0)),
-        ([(-x, -y, -z), (-x, -y, z), (-x, y, z), (-x, y, -z)], (-1, 0, 0)),
-        ([(-x, y, z), (x, y, z), (x, y, -z), (-x, y, -z)], (0, 1, 0)),
-        ([(-x, -y, -z), (x, -y, -z), (x, -y, z), (-x, -y, z)], (0, -1, 0)),
+        ([(k, -k, zi), (k, -k, -zi), (k, k, -zi), (k, k, zi)], (1, 0, 0)),
+        ([(-k, -k, -zi), (-k, -k, zi), (-k, k, zi), (-k, k, -zi)], (-1, 0, 0)),
+        ([(-k, k, zi), (k, k, zi), (k, k, -zi), (-k, k, -zi)], (0, 1, 0)),
+        ([(-k, -k, -zi), (k, -k, -zi), (k, -k, zi), (-k, -k, zi)], (0, -1, 0)),
     ]
     return b.prim([front, rear], 0), b.prim(sides, 1)
 
@@ -197,7 +201,7 @@ def make_gltf(animated=True, rounded=False):
             {"name": "Tile", "mesh": 0, "translation": [0, TILE_Y, 0]},
             {"name": "Name", "mesh": 1},
         ],
-        "meshes": [{"name": "Tile", "primitives": [faces, body] if rounded else [faces]},
+        "meshes": [{"name": "Tile", "primitives": [faces, body]},
                    {"name": "Name", "primitives": [name]}],
         "materials": [
             # the icon's corners are cut round by its transparency (a rounded
@@ -229,11 +233,11 @@ def make_gltf(animated=True, rounded=False):
 
 
 def jingle_samples(rate=32730):
-    """A short, soft chime (about 1.8 s): two sine-bell notes a fifth apart,
+    """A short, soft chime (1.6 s): two sine-bell notes a fifth apart,
     slow to fade, with a gentle echo; quiet, so hovering over the icon is
     calm rather than loud."""
     notes = [(0.00, 72), (0.16, 79)]           # C5, then G5
-    total = int(rate * 1.8)
+    total = int(rate * 1.6) & ~15               # as long as the sound that worked, whole 16-sample blocks
     out = [0.0] * total
     for start, midi in notes:
         f = 440 * 2 ** ((midi - 69) / 12)
