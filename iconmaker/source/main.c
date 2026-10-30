@@ -30,6 +30,7 @@
 #include "fwdcia.h"
 #include "deficon.h"
 #include "ui.h"
+#include "pngshrink.h"
 
 #include <turbojpeg.h>
 
@@ -70,6 +71,13 @@ static int fit_mode = FIT_PAD;
  * pic_types, or -1 if there's none (found when the folder is read) */
 typedef struct { char name[256]; bool dir, has_icon; int sys; s8 pic[2]; } entry;
 static const char *const pic_types[] = { "png", "jpg", "jpeg" };
+/* Pictures too big to use (an icon from the name instead, and a note): a
+ * side over PIC_MAX_SIDE, a file over PIC_MAX_FILE (JPEGs are read whole),
+ * or, where a picture must be decoded all at once (interlaced PNGs, JPEGs
+ * libjpeg-turbo can't read), over PIC_MAX_FULL bytes decoded */
+#define PIC_MAX_SIDE  4096
+#define PIC_MAX_FILE  (32 << 20)
+#define PIC_MAX_FULL  (8 << 20)
 typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; int sys; } icon_entry;
 
 /* the emulators an icon can start (the publisher on an icon names it) */
@@ -532,7 +540,7 @@ static const u8 *template_smdh(const u8 *cia, u32 size)
 /* A JPEG at the smallest size libjpeg-turbo decodes it to (1/8, 1/4, ...)
  * that is still at least min_w x min_h, as RGBA; NULL if it can't read it.
  * Much faster than decoding all of a big cover and scaling it down after. */
-static u8 *jpeg_load(const u8 *buf, size_t size, int min_w, int min_h, int *w, int *h)
+static u8 *jpeg_load(const u8 *buf, size_t size, int min_w, int min_h, int *w, int *h, bool *too_big)
 {
    static tjhandle tj;
    tjscalingfactor *sf, best = { 1, 1 };
@@ -546,6 +554,13 @@ static u8 *jpeg_load(const u8 *buf, size_t size, int min_w, int min_h, int *w, i
    jh = tj3Get(tj, TJPARAM_JPEGHEIGHT);
    if (jw <= 0 || jh <= 0)
       return NULL;
+   if (jw > PIC_MAX_SIDE || jh > PIC_MAX_SIDE)
+   {
+      *w = jw;
+      *h = jh;
+      *too_big = true;
+      return NULL;
+   }
    sf = tj3GetScalingFactors(&nsf);
    for (i = 0; sf && i < nsf; i++)
       if (sf[i].num <= sf[i].denom && TJSCALED(jw, sf[i]) >= min_w && TJSCALED(jh, sf[i]) >= min_h &&
@@ -567,48 +582,93 @@ static u8 *jpeg_load(const u8 *buf, size_t size, int min_w, int min_h, int *w, i
 }
 
 /* The game's picture with this ending ("" or ".banner") and type (an index
- * into pic_types, -1: none), as RGBA, or NULL. A JPEG comes at least
- * min_w x min_h (or its own size if smaller), but often not much bigger. */
-static u8 *load_picture(const char *game, const char *ext, int type, int min_w, int min_h, int *w, int *h)
+ * into pic_types, -1: none), as RGBA, or NULL. It comes at least
+ * min_w x min_h (or its own size if smaller), but often not much bigger:
+ * PNGs are shrunk while read (pngshrink.c), JPEGs decoded small by
+ * libjpeg-turbo; stb_image decodes all of the rest (interlaced PNGs, JPEGs
+ * libjpeg-turbo can't read) if that fits in PIC_MAX_FULL. NULL with
+ * *too_big if the picture is too big for that, *w x *h its size (if known). */
+static u8 *load_picture(const char *game, const char *ext, int type, int min_w, int min_h,
+                        int *w, int *h, bool *too_big)
 {
    char file[600];
    const char *dot = strrchr(game, '.');
    bool banner = ext[0] != 0;
-   u8 *buf, *img = NULL;
+   u8 sig[8], *buf = NULL, *img = NULL;
    long size;
-   int n;
+   int n, interlaced = 0;
+   u32 mem = 0;
    FILE *f;
+   *too_big = false;
+   *w = *h = 0;
    if (type < 0)
       return NULL;
    snprintf(file, sizeof(file), "%.*s%s.%s", (int)(dot - game), game, ext, pic_types[type]);
    if (!(f = fopen(file, "rb")))
       return NULL;
+   setvbuf(f, NULL, _IOFBF, 64 * 1024);  /* the SD card is much faster in big reads */
    fseek(f, 0, SEEK_END);
    size = ftell(f);
    fseek(f, 0, SEEK_SET);
-   buf = size > 0 && size < (32 << 20) ? malloc(size) : NULL;
-   if (buf && fread(buf, 1, size, f) != (size_t)size)
+   /* by what's in it, not the name: a .jpg can be a PNG */
+   if (fread(sig, 1, 8, f) == 8 && !memcmp(sig, "\x89PNG\r\n\x1a\n", 8))
    {
-      free(buf);
-      buf = NULL;
+      fseek(f, 0, SEEK_SET);
+      img = png_shrink(f, min_w, min_h, PIC_MAX_SIDE, w, h, &interlaced, &mem);
+      tm_mark(banner ? "banner: read + shrink PNG (libpng)" : "icon: read + shrink PNG (libpng)");
+      if (!img && (!interlaced || *w > PIC_MAX_SIDE || *h > PIC_MAX_SIDE ||
+                   (long long)*w * *h * 4 > PIC_MAX_FULL))
+      {
+         *too_big = *w > PIC_MAX_SIDE || *h > PIC_MAX_SIDE || interlaced;
+         fclose(f);
+         return NULL;
+      }
+   }
+   if (!img)
+   {
+      buf = size > 0 && size <= PIC_MAX_FILE ? malloc(size) : NULL;
+      fseek(f, 0, SEEK_SET);
+      if (buf && fread(buf, 1, size, f) != (size_t)size)
+      {
+         free(buf);
+         buf = NULL;
+      }
+      *too_big = size > PIC_MAX_FILE;
+      tm_mark(banner ? "banner: read the file" : "icon: read the file");
    }
    fclose(f);
-   tm_mark(banner ? "banner: read the file" : "icon: read the file");
-   if (!buf)
-      return NULL;
-   if (size > 2 && buf[0] == 0xFF && buf[1] == 0xD8)
+   if (buf && size > 2 && buf[0] == 0xFF && buf[1] == 0xD8)
    {
-      img = jpeg_load(buf, size, min_w, min_h, w, h);
+      img = jpeg_load(buf, size, min_w, min_h, w, h, too_big);
       tm_mark(banner ? "banner: decode (libjpeg-turbo)" : "icon: decode (libjpeg-turbo)");
    }
-   if (!img)                           /* PNGs, and JPEGs libjpeg-turbo can't read */
+   if (buf && !img && !*too_big)
    {
-      img = stbi_load_from_memory(buf, size, w, h, &n, 4);
+      /* all of it at once: only if that fits */
+      int iw, ih;
+      if (stbi_info_from_memory(buf, size, &iw, &ih, &n))
+      {
+         if (iw > PIC_MAX_SIDE || ih > PIC_MAX_SIDE || (long long)iw * ih * 4 > PIC_MAX_FULL)
+         {
+            *w = iw;
+            *h = ih;
+            *too_big = true;
+         }
+         else
+         {
+            img = stbi_load_from_memory(buf, size, w, h, &n, 4);
+            mem = (u32)iw * ih * 4;
+         }
+      }
       tm_mark(banner ? "banner: decode (stb_image)" : "icon: decode (stb_image)");
    }
 #ifdef ICONMAKER_TIMING
-   snprintf(tm_pic[banner], sizeof(tm_pic[0]), "%s, %ld KB, decoded at %dx%d",
-            pic_types[type], size / 1024, img ? *w : 0, img ? *h : 0);
+   if (*too_big)
+      snprintf(tm_pic[banner], sizeof(tm_pic[0]), "%s, %ld KB, %dx%d: too big%s",
+               pic_types[type], size / 1024, *w, *h, interlaced ? " (interlaced)" : "");
+   else
+      snprintf(tm_pic[banner], sizeof(tm_pic[0]), "%s, %ld KB, decoded at %dx%d, %lu KB used",
+               pic_types[type], size / 1024, img ? *w : 0, img ? *h : 0, (unsigned long)(mem / 1024));
 #endif
    free(buf);
    return img;
@@ -789,6 +849,8 @@ typedef struct
    char title[64];
    int sys;
    bool has_icon_png, has_banner_png;
+   bool icon_too_big, banner_too_big;   /* a picture too big to use, */
+   int icon_big[2], banner_big[2];      /* and its size (0 x 0: not known) */
 } game_art;
 
 static void make_art(const char *path, const entry *e, game_art *a)
@@ -796,13 +858,17 @@ static void make_art(const char *path, const entry *e, game_art *a)
    const char *name = strrchr(path, '/') + 1, *dot = strrchr(name, '.');
    int n = (int)(dot - name), sys = e->sys, iw, ih, bw, bh;
    u8 *icon_png, *banner_png = NULL;
+   bool big;
 
    snprintf(a->title, sizeof(a->title), "%.*s", n > 63 ? 63 : n, name);
    a->sys = sys;
    /* the picture at 128x128 first (the 3D tile, the generated banner), then
     * the icon from that: big pictures are scaled down only once */
-   icon_png = load_picture(path, "", e->pic[0], 128, 128, &iw, &ih);
+   icon_png = load_picture(path, "", e->pic[0], 128, 128, &iw, &ih, &big);
    a->has_icon_png = icon_png != NULL;
+   a->icon_too_big = big;
+   a->icon_big[0] = iw;
+   a->icon_big[1] = ih;
    if (icon_png)
    {
       fit_picture(icon_png, iw, ih, a->label, 128, 128);
@@ -818,9 +884,14 @@ static void make_art(const char *path, const entry *e, game_art *a)
    tm_mark("icon: scale to 48x48");
    /* the 3D banner shows neither a banner picture nor the flat banner */
    a->has_banner_png = e->pic[1] >= 0;
+   a->banner_too_big = false;
    if (banner_style != STYLE_3D)
    {
-      banner_png = load_picture(path, ".banner", e->pic[1], 256, 128, &bw, &bh);
+      banner_png = load_picture(path, ".banner", e->pic[1], 256, 128, &bw, &bh, &big);
+      a->has_banner_png = banner_png != NULL;
+      a->banner_too_big = big;
+      a->banner_big[0] = bw;
+      a->banner_big[1] = bh;
       if (banner_png)
       {
          fit_picture(banner_png, bw, bh, a->banner, 256, 128);
@@ -1211,13 +1282,24 @@ static void draw_top_game(const game_art *a, bool installed)
    ui_rrect(28, 164, 56, 56, 10, C_PANEL);
    blit_rgba(a->icon48, 48, 48, 32, 168, 1);
    ui_text(&ui_font_bold, 96, 164, a->title, C_TEXT, UI_W - 110);
-   ui_text(&ui_font_small, 96, 186, !a->has_icon_png ? "Icon: made from the name"
-           : fit_mode == FIT_CROP ? "Icon: its picture, cropped (X)" : "Icon: its picture, padded (X)", C_DIM, 0);
-   ui_text(&ui_font_small, 96, 201, a->has_banner_png && banner_style != STYLE_3D ? (fit_mode == FIT_CROP ? "Banner: its .banner picture, cropped (X)"
-                                                                            : "Banner: its .banner picture, padded (X)")
-           : banner_style == STYLE_3D ? "Banner: 3D, the icon turns (SELECT)"
-           : banner_style == STYLE_CLEAR ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)",
-           C_DIM, 0);
+   {
+      /* a picture too big to use says so, and its size */
+      char big[2][48];
+      snprintf(big[0], sizeof(big[0]), a->icon_big[0] ? "Icon: picture too big (%dx%d)" : "Icon: picture too big",
+               a->icon_big[0], a->icon_big[1]);
+      snprintf(big[1], sizeof(big[1]), a->banner_big[0] ? "Banner: picture too big (%dx%d)" : "Banner: picture too big",
+               a->banner_big[0], a->banner_big[1]);
+      ui_text(&ui_font_small, 96, 186, a->icon_too_big ? big[0]
+              : !a->has_icon_png ? "Icon: made from the name"
+              : fit_mode == FIT_CROP ? "Icon: its picture, cropped (X)" : "Icon: its picture, padded (X)",
+              a->icon_too_big ? C_WARN : C_DIM, 0);
+      ui_text(&ui_font_small, 96, 201, banner_style != STYLE_3D && a->banner_too_big ? big[1]
+              : a->has_banner_png && banner_style != STYLE_3D ? (fit_mode == FIT_CROP ? "Banner: its .banner picture, cropped (X)"
+                                                                                      : "Banner: its .banner picture, padded (X)")
+              : banner_style == STYLE_3D ? "Banner: 3D, the icon turns (SELECT)"
+              : banner_style == STYLE_CLEAR ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)",
+              banner_style != STYLE_3D && a->banner_too_big ? C_WARN : C_DIM, 0);
+   }
    {
       char opens[80];
       if (sys_installed[a->sys])

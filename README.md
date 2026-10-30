@@ -240,8 +240,8 @@ start `gpsp3d.3dsx` with the game's path as its argument also work.
 
 You need [devkitPro](https://devkitpro.org/wiki/Getting_Started) with the 3DS
 packages (`3ds-dev`, which includes libctru, citro3d and picasso) and, for Icon
-Maker, `3ds-libjpeg-turbo` (`dkp-pacman -S 3ds-libjpeg-turbo`), plus `makerom`
-and `bannertool` in your PATH.
+Maker, `3ds-libjpeg-turbo` and `3ds-libpng` (`dkp-pacman -S 3ds-libjpeg-turbo
+3ds-libpng`), plus `makerom` and `bannertool` in your PATH.
 
 ```
 git clone https://github.com/bheppe/gpsp-3d
@@ -257,7 +257,7 @@ Icon Maker: `bash gpsp-3d/iconmaker/build-iconmaker.sh` (results in
 ### Building in a devcontainer
 
 The repo has a devcontainer with everything above already installed (devkitARM
-with `3ds-dev` and `3ds-libjpeg-turbo`, plus `makerom` and `bannertool` at pinned versions). Open the
+with `3ds-dev`, `3ds-libjpeg-turbo` and `3ds-libpng`, plus `makerom` and `bannertool` at pinned versions). Open the
 repo in VS Code with the Dev Containers extension (Docker or Podman) and choose
 **Reopen in Container**, or start a GitHub Codespace. The first start builds
 the image, which takes a few minutes. Then, in the container's terminal:

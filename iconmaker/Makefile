@@ -30,8 +30,9 @@ CFLAGS   += -DICONMAKER_TIMING
 endif
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
-# libjpeg-turbo (3ds-libjpeg-turbo) decodes JPEG covers at the size needed
-LIBS     := -lturbojpeg -lctru -lm
+# libjpeg-turbo (3ds-libjpeg-turbo) decodes JPEG covers at the size needed,
+# libpng (3ds-libpng) reads PNGs a row at a time
+LIBS     := -lturbojpeg -lpng16 -lz -lctru -lm
 LIBDIRS  := $(PORTLIBS) $(CTRULIB)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))

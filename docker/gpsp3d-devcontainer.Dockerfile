@@ -3,7 +3,7 @@
 # can build in the same image. The toolchain is pinned, so rebuilding the image
 # cannot silently change it: devkitARM by digest (its image already has 3ds-dev:
 # libctru, citro3d, picasso, 3dsxtool, smdhtool, raw2c, and 3ds-libjpeg-turbo
-# for Icon Maker), bannertool and makerom
+# and 3ds-libpng for Icon Maker), bannertool and makerom
 # by commit. Renovate (.github/renovate.json) proposes updates to all three;
 # by hand, take a newer tag from https://hub.docker.com/r/devkitpro/devkitarm/tags
 # and its index digest.
@@ -36,9 +36,9 @@ RUN git clone https://github.com/3DSGuy/Project_CTR.git /tmp/Project_CTR \
 
 FROM ${DEVKITARM_IMAGE}
 
-# Icon Maker decodes JPEGs with libjpeg-turbo; the pinned image has it, this
-# makes sure (and installs nothing then)
-RUN dkp-pacman -S --needed --noconfirm 3ds-libjpeg-turbo
+# Icon Maker decodes JPEGs with libjpeg-turbo and PNGs with libpng; the
+# pinned image has both, this makes sure (and installs nothing then)
+RUN dkp-pacman -S --needed --noconfirm 3ds-libjpeg-turbo 3ds-libpng
 
 # Host tools: a native compiler and Python for the PC tests (iconmaker/test) and
 # gpsp3ds/tools/make_font.py, plus git, gh and ssh for working in the container.
