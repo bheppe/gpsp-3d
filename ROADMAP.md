@@ -1,7 +1,7 @@
 # gpSP 3D roadmap
 
 What's been reported, what's done, and what's next. Reports come from
-[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.4, with v0.1.5 in testing (updated Oct 29).
+[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.6 (updated Nov 1).
 
 **Status key:** ✅ done · 🧪 done, needs testing on real hardware · 🔧 next up · 📋 planned · 💤 later / big project
 
@@ -65,16 +65,17 @@ What's been reported, what's done, and what's next. Reports come from
 
 | Change | Asked by | Status |
 |---|---|---|
-| **Menu touch scrolling** no longer changes the setting the drag starts on: taps act when the finger lifts (sliders still follow the finger) | Gaming4LifeDE (Discord) | 🧪 |
-| **Speed → Show stats removed**: it only worked with the Performance bottom screen; **System → Bottom screen → Performance** now always shows everything | Gaming4LifeDE (Discord) | 🧪 |
-| **2DS / New 2DS XL**: the 3D tab is greyed out ("no 3D screen") | Gaming4LifeDE (Discord) | 🧪 |
-| **Skipped frames** on the Performance screen; the log (`gpsp3d.log`) notes the console, 3D on/off and skipped frames, for compatibility reports | Gaming4LifeDE (Discord) | 🧪 |
-| **System → Clock adjust**: days and hours added to the 3DS clock for the game's real-time clock, for a console whose clock is wrong | Surge And Finn (Discord) | 🧪 |
-| **Game report form** on GitHub Issues (asks for console, 3D on/off, skipped frames) | Gaming4LifeDE (Discord) | 🧪 |
-| **Update check**: at startup (with Wi-Fi) asks GitHub for the latest release and says so at the bottom of the game list and in System -> Version; System -> Check for updates turns it off | DukeOfJelly (Discord) | 🧪 |
-| **More screen effects**: Light scanlines, Light grid (GBA SP), Dot matrix | King_Hikikomori (Reddit) | 🧪 |
-| **Overlays**: your own 400x240 PNG over the game (`overlay.png`, or `overlays/<game>.png` per game) | King_Hikikomori (Reddit) | 🧪 |
-| **Button mapping** (Keys tab): each 3DS button -> any GBA button, Turbo A/B, fast forward or nothing; all games or per game | Strange_Wall_4062, Ferhath2015 (Reddit) | 🧪 |
+| **Menu touch scrolling** no longer changes the setting the drag starts on: taps act when the finger lifts (sliders still follow the finger) | Gaming4LifeDE (Discord) | ✅ |
+| **Speed → Show stats removed**: it only worked with the Performance bottom screen; **System → Bottom screen → Performance** now always shows everything | Gaming4LifeDE (Discord) | ✅ |
+| **2DS / New 2DS XL**: the 3D tab is greyed out ("no 3D screen") | Gaming4LifeDE (Discord) | 🧪 needs a 2DS to confirm |
+| **Skipped frames** on the Performance screen; the log (`gpsp3d.log`) notes the console, 3D on/off and skipped frames, for compatibility reports | Gaming4LifeDE (Discord) | ✅ |
+| **System → Clock adjust**: days and hours added to the 3DS clock for the game's real-time clock, for a console whose clock is wrong | Surge And Finn (Discord) | ✅ |
+| **Game report form** on GitHub Issues (asks for console, 3D on/off, skipped frames) | Gaming4LifeDE (Discord) | ✅ |
+| **Icon Maker 0.1.5: JPEG pictures, any size, pad or crop** (X on the Games tab) (#17, #18) | michvllni (GitHub) | ✅ |
+| **Update check**: at startup (with Wi-Fi) asks GitHub for the latest release and says so at the bottom of the game list and in System -> Version; System -> Check for updates turns it off | DukeOfJelly (Discord) | ✅ |
+| **More screen effects**: Light scanlines, Light grid (GBA SP), Dot matrix | King_Hikikomori (Reddit) | ✅ |
+| **Overlays**: your own 400x240 PNG over the game (`overlay.png`, or `overlays/<game>.png` per game) | King_Hikikomori (Reddit) | ✅ |
+| **Button mapping** (Keys tab): each 3DS button -> any GBA button, Turbo A/B, fast forward or nothing; all games or per game | Strange_Wall_4062, Ferhath2015 (Reddit) | ✅ |
 
 **Snes9x 3D v1.61-layers8: controls** ([snes9x_3ds](https://github.com/bheppe/snes9x_3ds))
 
@@ -82,8 +83,8 @@ What's been reported, what's done, and what's next. Reports come from
 |---|---|---|
 | **Hotkey combos** | cabjoy (Discord) | ✅ |
 | **True 1:1 integer scale** (No Stretch 1:1) | Finn (Discord) | ✅ |
-| **Two depth profiles per game**, switched with a hotkey (e.g. overworld vs battle in EarthBound) | Finn (Discord) | 🧪 |
-| **Guide viewer** on the bottom screen, like gpSP 3D's | cabjoy (Discord) | 🧪 |
+| **Two depth profiles per game**, switched with a hotkey (e.g. overworld vs battle in EarthBound) | Finn (Discord) | ✅ |
+| **Guide viewer** on the bottom screen, like gpSP 3D's | cabjoy (Discord) | ✅ |
 | **Mario is Missing!** in the Recommended list | SWChris (Discord) | ✅ |
 | **New app icon, 3D banner and a soft chime** (replaces the startup sound) | bheppe | ✅ |
 | Donkey Kong Country 2: thin white outline behind characters against the sky | margret (Discord) | 📋 needs investigating |
