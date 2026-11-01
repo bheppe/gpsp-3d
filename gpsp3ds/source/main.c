@@ -24,6 +24,8 @@
 #include "ui_screens.h"
 #include "unzip.h"
 #include "guide.h"
+#include "update.h"
+#include "overlay.h"
 
 /* gpSP takes up to 32 MB of the normal heap for ROM blocks, so keep the linear
  * heap (only needed for framebuffers and audio) small. */
@@ -151,12 +153,16 @@ static int opt_ff_toggle = 0;
 static int opt_ff_speed = 0;
 static bool ff_on;               /* toggle mode: fast forward is on */
 static int opt_rtc;           /* real-time clock: 0 Auto (the core decides), 1 On, 2 Off */
+static int opt_update = 1;    /* check GitHub for a newer release at startup */
 static int opt_rtc_days, opt_rtc_hours;   /* added to the 3DS clock for the game (a wrong 3DS clock) */
 static int opt_intro;         /* 1: start games with the GBA intro (needs the user's gba_bios.bin) */
 static int opt_bottom;        /* bottom screen while playing: 0 simple, 1 performance stats, 2 off after 10 s */
 static int opt_slot;          /* save-state slot 0..9 */
 static int opt_smooth = 1;    /* scaling (GPU display): 0 Sharp, 1 Crisp, 2 Smooth */
-static int opt_crt;           /* screen effect (GPU display): 0 Off, 1 Scanlines, 2 LCD grid */
+static int opt_crt;           /* screen effect (GPU display): 0 Off, 1 Scanlines, 2 LCD grid,
+                                 3 Light scanlines, 4 Light grid, 5 Dot matrix */
+#define FX_COUNT 6
+static int opt_overlay;       /* 1: draw overlay.png (or overlays/<game>.png) over the top screen */
 static int opt_audio_stretch = 1; /* slow the sound down instead of crackling */
 static int opt_gapfill = 1;   /* 3D: fill seams between layers */
 static int opt_lowprio;       /* core-2 render thread below system services (slower: off) */
@@ -350,6 +356,10 @@ static void config_load(void)
          opt_ff_speed = clampi(atoi(eq), 0, 3);
       else if (!strcmp(line, "rtc"))
          opt_rtc = clampi(atoi(eq), 0, 2);
+      else if (!strcmp(line, "overlay"))
+         opt_overlay = atoi(eq) ? 1 : 0;
+      else if (!strcmp(line, "update_check"))
+         opt_update = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "rtc_days"))
          opt_rtc_days = clampi(atoi(eq), -365, 365);
       else if (!strcmp(line, "rtc_hours"))
@@ -385,7 +395,7 @@ static void config_load(void)
       else if (!strcmp(line, "scaling"))
          opt_smooth = clampi(atoi(eq), 0, 2);
       else if (!strcmp(line, "screen_effect"))
-         opt_crt = clampi(atoi(eq), 0, 2);
+         opt_crt = clampi(atoi(eq), 0, FX_COUNT - 1);
       else if (!strcmp(line, "audio_stretch"))
          opt_audio_stretch = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "3d_gap_fill"))
@@ -420,10 +430,10 @@ static void config_save(void)
       return;
    fprintf(f, "last_dir=%s\nframe_skip=%d\nprofiler=%d\ncolor_style=%d\ncore2=%d\ndisplay=%d\ngpu=%d\n"
          "slot=%d\nscaling=%d\naudio_stretch=%d\ncore2_low_prio=%d\nsaturation=%d\nbrightness=%d\n3d_gap_fill=%d\nscreen_effect=%d\n"
-         "ff_toggle=%d\nff_speed=%d\nrtc=%d\nrtc_days=%d\nrtc_hours=%d\nstartup_intro=%d\nbottom=%d\n",
+         "ff_toggle=%d\nff_speed=%d\noverlay=%d\nupdate_check=%d\nrtc=%d\nrtc_days=%d\nrtc_hours=%d\nstartup_intro=%d\nbottom=%d\n",
          cur_dir, opt_frameskip, opt_profiler, opt_colorcorr, opt_core2, opt_display, opt_gpu,
          opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill, opt_crt,
-         opt_ff_toggle, opt_ff_speed, opt_rtc, opt_rtc_days, opt_rtc_hours, opt_intro, opt_bottom);
+         opt_ff_toggle, opt_ff_speed, opt_overlay, opt_update, opt_rtc, opt_rtc_days, opt_rtc_hours, opt_intro, opt_bottom);
    /* no menu entries for these: written even when empty so they can be found */
    fprintf(f, "save_dir=%s\nstate_dir=%s\nsave_ext=%s\n", opt_save_dir, opt_state_dir, opt_save_ext);
    /* the all-games 3D settings (a game with its own profile keeps them aside) */
@@ -714,9 +724,9 @@ static int opt_smooth_fwd(void);
 /* Screen effects: an 8x8 alpha pattern repeated once per GBA pixel and
  * drawn in black over the picture (rows: scanlines, rows + columns: LCD
  * grid). Texels are stored in the GPU's tiled (Morton) order. */
-static C3D_Tex           gpu_fx_tex[2];
+static C3D_Tex           gpu_fx_tex[FX_COUNT - 1];
 static bool              gpu_fx_ok;
-static void gpu_fx_fill(C3D_Tex *t, bool cols)
+static void gpu_fx_fill(C3D_Tex *t, int kind)
 {
    u8 *d = (u8*)t->data;
    int x, y;
@@ -727,14 +737,42 @@ static void gpu_fx_fill(C3D_Tex *t, bool cols)
          int a = 0;
          for (b = 0; b < 3; b++)
             m |= ((x >> b) & 1) << (2 * b) | ((y >> b) & 1) << (2 * b + 1);
-         if (y >= 6)
-            a = cols ? 0x70 : 0x78;   /* gap between rows */
-         if (cols && x >= 7)
-            a = a ? 0x90 : 0x60;      /* gap between columns */
+         switch (kind)
+         {
+            case 1:   /* scanlines */
+               if (y >= 6) a = 0x78;
+               break;
+            case 2:   /* LCD grid */
+               if (y >= 6) a = 0x70;
+               if (x >= 7) a = a ? 0x90 : 0x60;
+               break;
+            case 3:   /* light scanlines */
+               if (y >= 6) a = 0x40;
+               break;
+            case 4:   /* light grid, like the GBA SP's lit screen */
+               if (y >= 7) a = 0x38;
+               if (x >= 7) a = a ? 0x50 : 0x30;
+               break;
+            case 5:   /* dot matrix: round pixels, dark corners */
+            {
+               int dx = x * 2 - 7, dy = y * 2 - 7, r2 = dx * dx + dy * dy;   /* 0 (centre) .. 98 (corner) */
+               a = r2 <= 40 ? 0 : r2 >= 90 ? 0xA0 : (r2 - 40) * 0xA0 / 50;
+               break;
+            }
+         }
          d[m] = (u8)a;
       }
    C3D_TexFlush(t);
 }
+
+/* The overlay: a picture (up to 512x256, made for the 400x240 top screen)
+ * with see-through parts, drawn over the game, e.g. a bezel. Loaded when a
+ * game starts or the setting is turned on: overlays/<game>.png, else
+ * overlay.png, both in sdmc:/3ds/gpsp3d/. */
+static C3D_Tex gpu_ov_tex;
+static bool    gpu_ov_tex_ok, gpu_ov_have;
+static int     gpu_ov_w, gpu_ov_h;
+static char    gpu_ov_from[300];   /* which file is loaded */
 
 static C3D_Tex           gpu_up_tex[2];
 static C3D_RenderTarget *gpu_up[2];
@@ -804,7 +842,7 @@ static bool gpu_init(void)
       C3D_TexSetWrap(&gpu_up_tex[e], GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
    }
    gpu_fx_ok = true;
-   for (e = 0; e < 2; e++)
+   for (e = 0; e < FX_COUNT - 1; e++)
    {
       if (!C3D_TexInit(&gpu_fx_tex[e], 8, 8, GPU_A8))
       {
@@ -813,7 +851,7 @@ static bool gpu_init(void)
       }
       C3D_TexSetFilter(&gpu_fx_tex[e], GPU_LINEAR, GPU_LINEAR);
       C3D_TexSetWrap(&gpu_fx_tex[e], GPU_REPEAT, GPU_REPEAT);
-      gpu_fx_fill(&gpu_fx_tex[e], e == 1);
+      gpu_fx_fill(&gpu_fx_tex[e], e + 1);
    }
    if (!ctrInitGpu())
       return false;
@@ -1091,6 +1129,13 @@ static void gpu_submit(void)
          ctrAddRectEx(0xFF000000, r[0], r[1], r[2], r[3], 0, 0, GBA_W * 8, GBA_H * 8, 0);
          ctrFlushBatch();
       }
+      if (opt_overlay && gpu_ov_have)
+      {
+         /* over the whole screen, at screen depth in 3D */
+         ctrActivateTexture(&gpu_ov_tex);
+         ctrAddRectEx(0xFFFFFFFF, 0, 0, screen_w, TOP_H, 0, 0, gpu_ov_w, gpu_ov_h, 0);
+         ctrFlushBatch();
+      }
    }
    ctrEndFrame();
    gpu_guard_step("sending the frame");
@@ -1142,6 +1187,83 @@ static void present_idle(void)
 {
    while (present_busy)
       svcSleepThread(200000);
+}
+
+#define OV_FLAGS (GX_TRANSFER_FLIP_VERT(1) | GX_TRANSFER_OUT_TILED(1) | GX_TRANSFER_RAW_COPY(0) | \
+                  GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGBA8) | \
+                  GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
+
+void prof_log_line(const char *line);
+
+/* (Re)load the overlay picture for the current game, or drop it. */
+static void overlay_load(void)
+{
+   char path[400] = "";
+   unsigned char *px = NULL;
+   int w = 0, h = 0;
+   if (!gpu_ok)
+      return;
+   if (opt_overlay)
+   {
+      if (rom_name[0])
+      {
+         snprintf(path, sizeof(path), APP_DIR "/overlays/%s.png", rom_name);
+         px = overlay_png_load(path, &w, &h);
+      }
+      if (!px)
+      {
+         snprintf(path, sizeof(path), APP_DIR "/overlay.png");
+         px = overlay_png_load(path, &w, &h);
+      }
+      if (px && (w > 512 || h > 256 || w < 1 || h < 1))
+      {
+         char line[480];
+         snprintf(line, sizeof(line), "overlay %s is %dx%d: it can be 512x256 at most (400x240 fills the screen)", path, w, h);
+         prof_log_line(line);
+         overlay_png_free(px);
+         px = NULL;
+      }
+   }
+   if (px && gpu_ov_have && !strcmp(path, gpu_ov_from))
+   {
+      overlay_png_free(px);   /* already showing this one */
+      return;
+   }
+   present_idle();
+   gpu_ov_have = false;
+   gpu_ov_from[0] = 0;
+   if (!px)
+      return;
+   if (!gpu_ov_tex_ok && C3D_TexInit(&gpu_ov_tex, 512, 256, GPU_RGBA8))
+   {
+      gpu_ov_tex_ok = true;
+      C3D_TexSetFilter(&gpu_ov_tex, GPU_LINEAR, GPU_LINEAR);
+      C3D_TexSetWrap(&gpu_ov_tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+   }
+   if (gpu_ov_tex_ok)
+   {
+      u32 *lin = (u32*)linearAlloc(512 * 256 * 4);
+      if (lin)
+      {
+         int x, y;
+         memset(lin, 0, 512 * 256 * 4);
+         for (y = 0; y < h; y++)
+            for (x = 0; x < w; x++)
+            {
+               const u8 *p = px + (y * w + x) * 4;
+               lin[y * 512 + x] = (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3];
+            }
+         GSPGPU_FlushDataCache(lin, 512 * 256 * 4);
+         C3D_SyncDisplayTransfer(lin, GX_BUFFER_DIM(512, 256), (u32*)gpu_ov_tex.data,
+                                 GX_BUFFER_DIM(512, 256), OV_FLAGS);
+         linearFree(lin);
+         gpu_ov_have = true;
+         gpu_ov_w = w;
+         gpu_ov_h = h;
+         snprintf(gpu_ov_from, sizeof(gpu_ov_from), "%s", path);
+      }
+   }
+   overlay_png_free(px);
 }
 
 static void present_stop(void)
@@ -1956,6 +2078,13 @@ static void browse_draw(int sel, int top)
       names[i] = entries[i].name;
       isdir[i] = entries[i].dir;
    }
+   {
+      static char notice[64];
+      notice[0] = 0;
+      if (opt_update && update_state() == UPD_NEWER)
+         snprintf(notice, sizeof(notice), "gpSP 3D %s is out: update in Universal-Updater", update_latest());
+      scr_browser_notice = notice[0] ? notice : NULL;
+   }
    scr_browser(cur_dir + 5, names, isdir, n_entries, sel, top);
    ui_present();
 }
@@ -1986,11 +2115,17 @@ static bool browse(void)
    bool redraw = true, touch_down = false;
    int touch_y0 = 0, touch_idx = -1, moved = 0, hold_frames = 0;
 
+   int upd_seen = update_state();
    scan_dir();
    while (aptMainLoop())
    {
       u32 down, held;
       int step;
+      if (update_state() != upd_seen)
+      {
+         upd_seen = update_state();
+         redraw = true;   /* show "a new version is out" */
+      }
       hidScanInput();
       down = hidKeysDown() | (hidKeysDownRepeat() & (KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT));
       held = hidKeysHeld();
@@ -2218,6 +2353,7 @@ static bool game_load(void)
    }
    vars_changed = true;
    rtc_offset_apply();
+   overlay_load();
    if (!retro_load_game(&info))
       return false;
    game_loaded = true;
@@ -2497,13 +2633,13 @@ enum {
    /* Game */
    M_RESUME, M_SLOT, M_SAVE, M_LOAD, M_RESET, M_GUIDE, M_LIST, M_QUIT,
    /* Display */
-   M_SIZE, M_SMOOTH, M_CRT, M_CSTYLE, M_SAT, M_BRIGHT, M_COLRESET,
+   M_SIZE, M_SMOOTH, M_CRT, M_OVERLAY, M_CSTYLE, M_SAT, M_BRIGHT, M_COLRESET,
    /* 3D */
    M_3D, M_3DPCT, M_3DMETHOD, M_3DSMART, M_3DSTYLE, M_L0, M_L1, M_L2, M_L3, M_SPRITE, M_FOCUS, M_TILT, M_GAPFILL, M_PERGAME, M_3DRESET,
    /* Speed */
    M_SKIP, M_ASTRETCH, M_FFMODE, M_FFSPEED,
    /* System */
-   M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_RTC, M_RTCDAYS, M_RTCHOURS, M_INTRO, M_BOTTOM, M_SAVEINFO, M_ABOUT, M_CREDITS,
+   M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_RTC, M_RTCDAYS, M_RTCHOURS, M_INTRO, M_BOTTOM, M_UPDATE, M_SAVEINFO, M_ABOUT, M_CREDITS,
    M_HDR
 };
 
@@ -2600,11 +2736,24 @@ static void menu_build(int tab)
                                     "Smooth: soft, blended pixels.");
          }
          {
-            static const char *const fx[] = { "Off", "Scanlines", "LCD grid" };
+            static const char *const fx[FX_COUNT] = { "Off", "Scanlines", "LCD grid", "Light scanlines", "Light grid", "Dot matrix" };
+            static char ov_help[120];
             mrow_choice(M_CRT, "Screen effect", fx[opt_crt],
                   opt_crt == 1 ? "Scanlines: dark lines between the rows,\nlike a CRT TV. Best at Fit / Stretch." :
                   opt_crt == 2 ? "LCD grid: thin gaps around every pixel,\nlike the GBA screen. Best at Fit / Stretch." :
+                  opt_crt == 3 ? "Light scanlines: fainter lines between\nthe rows. Best at Fit / Stretch." :
+                  opt_crt == 4 ? "Light grid: faint gaps, like the GBA SP's\nlit screen. Best at Fit / Stretch." :
+                  opt_crt == 5 ? "Dot matrix: round pixels with dark\ncorners. Best at Fit / Stretch." :
                                  "No effect. (Needs GPU display.)");
+            if (!opt_overlay)
+               snprintf(ov_help, sizeof(ov_help), "A 400x240 PNG drawn over the game (e.g. a\nbezel): sdmc:/3ds/gpsp3d/overlay.png");
+            else if (gpu_ov_have)
+               snprintf(ov_help, sizeof(ov_help), "Showing %.70s", gpu_ov_from + 5);
+            else
+               snprintf(ov_help, sizeof(ov_help), "No picture found. Put a 400x240 PNG in\nsdmc:/3ds/gpsp3d/overlay.png");
+            if (!GPU_ACTIVE)
+               snprintf(ov_help, sizeof(ov_help), "Needs System > GPU display On.");
+            mrow_choice(M_OVERLAY, "Overlay", opt_overlay ? "On" : "Off", ov_help);
          }
          mrow_choice(M_CSTYLE, "Color style", cc_names[opt_colorcorr], "Original: colours as the game made them.\nGBA soft / GBA screen: like the old GBA LCD.");
          mrow_slider(M_SAT, "Saturation", opt_sat, 50, 150, "%d%%", "More or less colourful.\n100% = as the game drew it.");
@@ -2695,6 +2844,21 @@ static void menu_build(int tab)
                   "GBA intro needs your own gba_bios.bin in\nsdmc:/3ds/gpsp3d/. Applies when a game starts.");
             mrow_choice(M_BOTTOM, "Bottom screen", bottom_names[opt_bottom],
                   "While playing. Performance: speed and timing.\nOff: backlight off after 10 s, a tap wakes it.");
+            {
+               static char upd_help[96];
+               int st = update_state();
+               snprintf(upd_help, sizeof(upd_help), "%s",
+                  !opt_update     ? "On: when gpSP 3D starts, ask GitHub if a\nnew version is out (needs Wi-Fi)." :
+                  st == UPD_NEWER ? "" :
+                  st == UPD_CURRENT ? "You have the latest version." :
+                  st == UPD_CHECKING ? "Checking..." :
+                  st == UPD_OFFLINE ? "No Wi-Fi when gpSP 3D started, so it\ndidn't check. Checks again next start." :
+                  st == UPD_FAILED  ? "Couldn't reach GitHub. Checks again\nnext start." :
+                                      "Checks when gpSP 3D starts (needs Wi-Fi).");
+               if (opt_update && st == UPD_NEWER)
+                  snprintf(upd_help, sizeof(upd_help), "Version %s is out. Update it in\nUniversal-Updater (or FBI, see GitHub).", update_latest());
+               mrow_choice(M_UPDATE, "Check for updates", opt_update ? "On" : "Off", upd_help);
+            }
          }
          if (save_path[0])
          {
@@ -2710,7 +2874,10 @@ static void menu_build(int tab)
             mrows[mrow_n - 1].r.value = opt_save_dir[0] ? "Your save folder" :
                                         ra ? "RetroArch folder" : "Next to the game";
          }
-         snprintf(about, sizeof(about), "gpSP 3D " GPSP3D_VERSION);
+         if (update_state() == UPD_NEWER)
+            snprintf(about, sizeof(about), "%s  (%s is out)", GPSP3D_VERSION, update_latest());
+         else
+            snprintf(about, sizeof(about), "gpSP 3D " GPSP3D_VERSION);
          mrow_add(M_ABOUT, ROW_INFO, "Version", "gpSP (libretro, GPL-2), mGBA 3DS GPU\ncode (MPL-2.0), Inter font (OFL).");
          mrows[mrow_n - 1].r.value = about;
          mrow_add(M_CREDITS, ROW_INFO, "Credits", "gpSP: Exophase, notaz, davidgfnet and others.\nThanks: michvllni, hspman69 and all testers.");
@@ -2766,7 +2933,11 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
    {
       case M_SLOT:     CYCLEV(opt_slot, 10); make_state_path(); break;
       case M_SIZE:     CYCLEV(opt_display, 3); preview_later(false); break;
-      case M_CRT:      CYCLEV(opt_crt, 3); preview_later(false); break;
+      case M_CRT:      CYCLEV(opt_crt, FX_COUNT); preview_later(false); break;
+      case M_OVERLAY:  opt_overlay ^= 1; overlay_load(); preview_later(false);
+                       if (!GPU_ACTIVE) return "The overlay needs System > GPU display On";
+                       if (opt_overlay && !gpu_ov_have) return "No overlay.png in sdmc:/3ds/gpsp3d/";
+                       break;
       case M_SMOOTH:   CYCLEV(opt_smooth, 3); gpu_apply_filter(); preview_later(false);
                        if (!GPU_ACTIVE) return "Scaling needs System > GPU display On";
                        if (opt_display == 0) return "Original size is always 1:1 sharp";
@@ -2819,6 +2990,7 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
       case M_RTCHOURS: STEP(opt_rtc_hours, -23, 23, 1); rtc_offset_apply(); break;
       case M_INTRO:    opt_intro ^= 1; break;
       case M_BOTTOM:   CYCLEV(opt_bottom, 3); break;
+      case M_UPDATE:   opt_update ^= 1; if (opt_update) update_check_start(GPSP3D_VERSION); break;
       case M_CORE2:
          opt_core2 ^= 1;
          core2_apply();
@@ -2836,6 +3008,7 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
             {
                gpu_irq_hook();
                present_start();
+               overlay_load();
             }
             gpu_guard_clear();
             if (!gpu_ok)
@@ -3681,6 +3854,8 @@ int main(int argc, char **argv)
    mkdir("sdmc:/3ds", 0777);
    mkdir(APP_DIR, 0777);
    config_load();
+   if (opt_update)
+      update_check_start(GPSP3D_VERSION);
    if (!dir_exists(cur_dir))
       strcpy(cur_dir, "sdmc:/");
 
@@ -3768,6 +3943,7 @@ int main(int argc, char **argv)
    gpu_guard_set("closing: saving");
    game_unload();
    config_save();
+   update_check_stop();
    /* Shut down in order so the system can close us: stop the core-2 thread
     * first, then let the GPU finish and release it, then audio and screens. */
    gpu_guard_set("closing: stopping core 2");

@@ -61,7 +61,7 @@ What's been reported, what's done, and what's next. Reports come from
 | **Profiler no longer writes to the SD card while playing** (it wrote every 5 s with Show stats on) | bheppe | 🧪 |
 | `OPT=-O3` test build of the app code (the core is already -O3) | Gaming4LifeDE (Discord) | ✅ measured on Mario Kart: no difference, stays -O2 |
 
-**gpSP 3D v0.1.6: menu, 2DS and clock fixes**
+**gpSP 3D v0.1.6: menu fixes, clock adjust, screen effects, overlays, update check**
 
 | Change | Asked by | Status |
 |---|---|---|
@@ -71,6 +71,9 @@ What's been reported, what's done, and what's next. Reports come from
 | **Skipped frames** on the Performance screen; the log (`gpsp3d.log`) notes the console, 3D on/off and skipped frames, for compatibility reports | Gaming4LifeDE (Discord) | 🧪 |
 | **System → Clock adjust**: days and hours added to the 3DS clock for the game's real-time clock, for a console whose clock is wrong | Surge And Finn (Discord) | 🧪 |
 | **Game report form** on GitHub Issues (asks for console, 3D on/off, skipped frames) | Gaming4LifeDE (Discord) | 🧪 |
+| **Update check**: at startup (with Wi-Fi) asks GitHub for the latest release and says so at the bottom of the game list and in System -> Version; System -> Check for updates turns it off | DukeOfJelly (Discord) | 🧪 |
+| **More screen effects**: Light scanlines, Light grid (GBA SP), Dot matrix | King_Hikikomori (Reddit) | 🧪 |
+| **Overlays**: your own 400x240 PNG over the game (`overlay.png`, or `overlays/<game>.png` per game) | King_Hikikomori (Reddit) | 🧪 |
 
 **Snes9x 3D v1.61-layers8: controls** ([snes9x_3ds](https://github.com/bheppe/snes9x_3ds))
 
@@ -91,8 +94,6 @@ What's been reported, what's done, and what's next. Reports come from
 |---|---|
 | **New 3DS: drawing on its own CPU core** instead of sharing core 2 with the system | 📋 |
 | **Dynarec register allocation**: Mario Golf, the Super Mario Galaxy port, Golden Sun and WarioWare: Twisted on Old 3DS (#8, #10) | 📋 |
-| **Update check in the app**: tells you when a new version is out (install it with Universal-Updater) | 📋 DukeOfJelly (Discord) |
-| **More LCD filters**, plus your own PNG overlay from the SD card | 📋 King_Hikikomori (Reddit) |
 
 **Icon Maker v0.2: box art**
 

@@ -48,6 +48,7 @@ ui_hit scr_menu_hit(const ui_menu *m, int x, int y);
 void scr_browser(const char *path, const char *const *names, const unsigned char *isdir,
                  int n, int sel, int top);
 int  scr_browser_hit(int y, int top, int n);    /* index or -1 */
+extern const char *scr_browser_notice;          /* shown in the footer instead of the keys, or NULL */
 
 /* ---- in-game panel ---- */
 typedef struct {

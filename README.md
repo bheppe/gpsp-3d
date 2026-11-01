@@ -43,7 +43,15 @@ raise the 3D slider. No RetroArch needed.
   they write in memory until the menu opens or the game closes.
 - **Forwarder support.** Started with a ROM path as its first argument, the
   app plays that game directly and closes when you quit.
-- **Screen effects**: Scanlines and LCD grid (Display -> Screen effect).
+- **Screen effects**: Scanlines, LCD grid, Light scanlines, Light grid (like the
+  GBA SP) and Dot matrix (Display -> Screen effect).
+- **Overlays**: your own 400x240 PNG with see-through parts drawn over the game,
+  such as a bezel (Display -> Overlay). Put it in `sdmc:/3ds/gpsp3d/overlay.png`,
+  or `sdmc:/3ds/gpsp3d/overlays/<game name>.png` for one game (the name of the
+  game's file without `.gba`). Needs System -> GPU display On.
+- **Update check**: with Wi-Fi on, gpSP 3D asks GitHub at startup whether a new
+  version is out and says so at the bottom of the game list
+  (System -> Check for updates turns it off).
 - **HOME Menu icons per game** (forwarders), made right on the 3DS with
   **Icon Maker** (GBA and SNES games), or on a PC. Their banner is 3D: the
   game's icon on a turning tile that comes out of the screen, its name under

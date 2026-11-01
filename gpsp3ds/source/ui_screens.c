@@ -226,6 +226,8 @@ static void icon_cart(int x, int y, uint16_t c)
    ui_fill(x + 3, y + 11, 10, 1, C_BG);
 }
 
+const char *scr_browser_notice;
+
 void scr_browser(const char *path, const char *const *names, const unsigned char *isdir,
                  int n, int sel, int top)
 {
@@ -263,7 +265,13 @@ void scr_browser(const char *path, const char *const *names, const unsigned char
       ui_rrect(UI_W - 4, LIST_Y + (track - bar) * top / (n - LIST_ROWS), 3, bar, 1, C_FAINT);
    }
    ui_fill(0, 214, UI_W, 26, C_BG2);
-   ui_text_vc(&ui_font_small, 10, 214, 26, "A or tap: open     B: back     START: quit", C_DIM, 0);
+   if (scr_browser_notice)
+   {
+      ui_circle(16, 227, 4, C_ACCENT);
+      ui_text_vc(&ui_font_small, 26, 214, 26, scr_browser_notice, C_TEXT, UI_W - 36);
+   }
+   else
+      ui_text_vc(&ui_font_small, 10, 214, 26, "A or tap: open     B: back     START: quit", C_DIM, 0);
 }
 
 int scr_browser_hit(int y, int top, int n)
