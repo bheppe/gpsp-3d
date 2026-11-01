@@ -325,10 +325,74 @@ static void d3_write(FILE *f, const s3d *d)
            d->layer[2], d->layer[3], d->sprite, d->focus, d->smart, d->fast, d->tilt);
 }
 
+/* ---- Button mapping ----
+ * Each 3DS button gives one GBA button (or turbo, or fast forward). The
+ * D-pad and Circle Pad are always the GBA D-pad. Saved for all games in
+ * gpsp3d.cfg (keys=), or for one game in games/<game>.keys. */
+enum { KT_NONE, KT_A, KT_B, KT_L, KT_R, KT_START, KT_SELECT, KT_TURBO_A, KT_TURBO_B, KT_FF, KT_COUNT };
+static const char *const kt_names[KT_COUNT] = { "Nothing", "A", "B", "L", "R", "START", "SELECT", "Turbo A", "Turbo B", "Fast forward" };
+#define NKEYS 10
+static const u32 key_bits[NKEYS] = { KEY_A, KEY_B, KEY_X, KEY_Y, KEY_L, KEY_R, KEY_ZL, KEY_ZR, KEY_START, KEY_SELECT };
+static const char *const key_names[NKEYS] = { "A", "B", "X", "Y", "L", "R", "ZL", "ZR", "START", "SELECT" };
+static const char *const key_cfg[NKEYS] = { "a", "b", "x", "y", "l", "r", "zl", "zr", "start", "select" };
+static const u8 keymap_default[NKEYS] = { KT_A, KT_B, KT_NONE, KT_FF, KT_L, KT_R, KT_NONE, KT_NONE, KT_START, KT_SELECT };
+static u8   keymap[NKEYS], keymap_global[NKEYS];
+static bool keys_pergame;
+static u32  turbo_tick;   /* frames: turbo buttons press for 2, release for 2 */
+
+/* the 3DS buttons set to fast forward */
+static u32 keys_ff_mask(void)
+{
+   u32 m = 0;
+   int i;
+   for (i = 0; i < NKEYS; i++)
+      if (keymap[i] == KT_FF)
+         m |= key_bits[i];
+   return m;
+}
+
+/* "Y" or "Y / ZR" or "no button" */
+static const char *keys_ff_names(void)
+{
+   static char b[40];
+   int i;
+   b[0] = 0;
+   for (i = 0; i < NKEYS; i++)
+      if (keymap[i] == KT_FF)
+         snprintf(b + strlen(b), sizeof(b) - strlen(b), "%s%s", b[0] ? " / " : "", key_names[i]);
+   return b[0] ? b : "no button";
+}
+
+static void keys_parse(u8 *map, const char *s)
+{
+   /* "1,2,0,9,..." in key_cfg order */
+   int i;
+   for (i = 0; i < NKEYS && *s; i++)
+   {
+      int v = atoi(s);
+      map[i] = (u8)(v >= 0 && v < KT_COUNT ? v : keymap_default[i]);
+      s = strchr(s, ',');
+      if (!s)
+         break;
+      s++;
+   }
+}
+
+static void keys_format(const u8 *map, char *out, size_t n)
+{
+   int i;
+   out[0] = 0;
+   for (i = 0; i < NKEYS; i++)
+      snprintf(out + strlen(out), n - strlen(out), "%s%d", i ? "," : "", map[i]);
+}
+
 static void config_load(void)
 {
    char line[600];
-   FILE *f = fopen(CONFIG_PATH, "r");
+   FILE *f;
+   memcpy(keymap_global, keymap_default, NKEYS);
+   memcpy(keymap, keymap_default, NKEYS);
+   f = fopen(CONFIG_PATH, "r");
    if (!f)
       return;
    while (fgets(line, sizeof(line), f))
@@ -356,6 +420,8 @@ static void config_load(void)
          opt_ff_speed = clampi(atoi(eq), 0, 3);
       else if (!strcmp(line, "rtc"))
          opt_rtc = clampi(atoi(eq), 0, 2);
+      else if (!strcmp(line, "keys"))
+         keys_parse(keymap_global, eq);
       else if (!strcmp(line, "overlay"))
          opt_overlay = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "update_check"))
@@ -436,6 +502,11 @@ static void config_save(void)
          opt_ff_toggle, opt_ff_speed, opt_overlay, opt_update, opt_rtc, opt_rtc_days, opt_rtc_hours, opt_intro, opt_bottom);
    /* no menu entries for these: written even when empty so they can be found */
    fprintf(f, "save_dir=%s\nstate_dir=%s\nsave_ext=%s\n", opt_save_dir, opt_state_dir, opt_save_ext);
+   {
+      char k[64];
+      keys_format(keys_pergame ? keymap_global : keymap, k, sizeof(k));
+      fprintf(f, "keys=%s\n", k);   /* a, b, x, y, l, r, zl, zr, start, select */
+   }
    /* the all-games 3D settings (a game with its own profile keeps them aside) */
    d3_write(f, d3_pergame ? &d3_global : &d3);
    fclose(f);
@@ -1597,19 +1668,27 @@ static int16_t input_state(unsigned port, unsigned device, unsigned index, unsig
 {
    u32 k = keys_held;
    int16_t m = 0;
+   int i;
+   bool turbo_on = (turbo_tick & 2) != 0;
+   static const u8 bit[KT_COUNT] = { 0, RETRO_DEVICE_ID_JOYPAD_A, RETRO_DEVICE_ID_JOYPAD_B,
+      RETRO_DEVICE_ID_JOYPAD_L, RETRO_DEVICE_ID_JOYPAD_R, RETRO_DEVICE_ID_JOYPAD_START,
+      RETRO_DEVICE_ID_JOYPAD_SELECT, RETRO_DEVICE_ID_JOYPAD_A, RETRO_DEVICE_ID_JOYPAD_B, 0 };
    (void)index;
    if (port != 0 || device != RETRO_DEVICE_JOYPAD)
       return 0;
-   if (k & KEY_B)      m |= 1 << RETRO_DEVICE_ID_JOYPAD_B;
-   if (k & KEY_A)      m |= 1 << RETRO_DEVICE_ID_JOYPAD_A;
-   if (k & KEY_SELECT) m |= 1 << RETRO_DEVICE_ID_JOYPAD_SELECT;
-   if (k & KEY_START)  m |= 1 << RETRO_DEVICE_ID_JOYPAD_START;
+   for (i = 0; i < NKEYS; i++)
+   {
+      int t = keymap[i];
+      if (!(k & key_bits[i]) || t == KT_NONE || t == KT_FF)
+         continue;
+      if ((t == KT_TURBO_A || t == KT_TURBO_B) && !turbo_on)
+         continue;
+      m |= 1 << bit[t];
+   }
    if (k & KEY_UP)     m |= 1 << RETRO_DEVICE_ID_JOYPAD_UP;
    if (k & KEY_DOWN)   m |= 1 << RETRO_DEVICE_ID_JOYPAD_DOWN;
    if (k & KEY_LEFT)   m |= 1 << RETRO_DEVICE_ID_JOYPAD_LEFT;
    if (k & KEY_RIGHT)  m |= 1 << RETRO_DEVICE_ID_JOYPAD_RIGHT;
-   if (k & KEY_L)      m |= 1 << RETRO_DEVICE_ID_JOYPAD_L;
-   if (k & KEY_R)      m |= 1 << RETRO_DEVICE_ID_JOYPAD_R;
    if (id == RETRO_DEVICE_ID_JOYPAD_MASK)
       return m;
    return (m >> id) & 1;
@@ -2240,6 +2319,46 @@ static bool state_exists(int slot)
 static void profile_load_fwd(void);
 static void profile_leave_fwd(void);
 
+static void keys_path(char *out, size_t n)
+{
+   snprintf(out, n, "%s/games/%s.keys", APP_DIR, rom_name);
+}
+
+/* on game load: the game's own buttons if it has them */
+static void keys_load_game(void)
+{
+   char p[600], line[96];
+   FILE *f;
+   if (keys_pergame)
+      memcpy(keymap, keymap_global, NKEYS);   /* leaving the last game's own set */
+   keys_pergame = false;
+   keys_path(p, sizeof(p));
+   f = fopen(p, "r");
+   if (!f)
+      return;
+   if (fgets(line, sizeof(line), f) && !strncmp(line, "keys=", 5))
+   {
+      memcpy(keymap_global, keymap, NKEYS);
+      keys_parse(keymap, line + 5);
+      keys_pergame = true;
+   }
+   fclose(f);
+}
+
+static void keys_save_game(void)
+{
+   char p[600], k[64];
+   FILE *f;
+   keys_path(p, sizeof(p));
+   mkdir_path(p);
+   f = fopen(p, "w");
+   if (!f)
+      return;
+   keys_format(keymap, k, sizeof(k));
+   fprintf(f, "keys=%s\n", k);
+   fclose(f);
+}
+
 static void make_paths(void)
 {
    const char *slash = strrchr(rom_path, '/');
@@ -2363,6 +2482,7 @@ static bool game_load(void)
    tilt_on = gpsp_tilt_present() && R_SUCCEEDED(HIDUSER_EnableAccelerometer());
    sram_load();
    profile_load_fwd();
+   keys_load_game();
    guide_open(rom_path, rom_name, APP_DIR);
    {
       char line[400];
@@ -2638,13 +2758,15 @@ enum {
    M_3D, M_3DPCT, M_3DMETHOD, M_3DSMART, M_3DSTYLE, M_L0, M_L1, M_L2, M_L3, M_SPRITE, M_FOCUS, M_TILT, M_GAPFILL, M_PERGAME, M_3DRESET,
    /* Speed */
    M_SKIP, M_ASTRETCH, M_FFMODE, M_FFSPEED,
+   /* Keys */
+   M_KPERGAME, M_K0, M_K1, M_K2, M_K3, M_K4, M_K5, M_K6, M_K7, M_K8, M_K9, M_KRESET,
    /* System */
    M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_RTC, M_RTCDAYS, M_RTCHOURS, M_INTRO, M_BOTTOM, M_UPDATE, M_SAVEINFO, M_ABOUT, M_CREDITS,
    M_HDR
 };
 
-static const char *const menu_tabs[] = { "Game", "Display", "3D", "Speed", "System" };
-#define MENU_NTABS 5
+static const char *const menu_tabs[] = { "Game", "Display", "3D", "Speed", "Keys", "System" };
+#define MENU_NTABS 6
 #define MENU_MAXROWS 16
 
 typedef struct { int id; ui_row r; const char *help; char vbuf[24]; } mrow;
@@ -2807,13 +2929,31 @@ static void menu_build(int tab)
          mrow_choice(M_ASTRETCH, "Audio when slow", opt_audio_stretch ? "Stretch" : "Normal", "Stretch: if the game runs slow, slow the\nsound down instead of crackling.");
          {
             static const char *speeds[4] = { "Max", "2x", "3x", "4x" };
-            mrow_choice(M_FFMODE, "Fast forward (Y)", opt_ff_toggle ? "Toggle" : "Hold",
-                        "Hold: fast while Y is held.\nToggle: Y turns it on and off.");
+            static char ffh[96];
+            snprintf(ffh, sizeof(ffh), "Hold: fast while the button is held.\nToggle: it turns it on/off. Button: %s", keys_ff_names());
+            mrow_choice(M_FFMODE, "Fast forward", opt_ff_toggle ? "Toggle" : "Hold", ffh);
             mrow_choice(M_FFSPEED, "Fast forward speed", speeds[opt_ff_speed],
                         "Max: as fast as the 3DS can go (light\ngames: 2-4x on Old 3DS, more on New).");
          }
          break;
       case 4:
+      {
+         int i;
+         mrow_choice(M_KPERGAME, "Settings for", keys_pergame ? "This game" : "All games",
+               "This game: keep these buttons just for\nthis game (saved per game).");
+         mrow_add(M_HDR, ROW_HEADER, "3DS BUTTON  ->  IN THE GAME", NULL);
+         for (i = 0; i < NKEYS; i++)
+         {
+            static char lbl[NKEYS][16];
+            snprintf(lbl[i], sizeof(lbl[i]), "3DS %s", key_names[i]);
+            mrow_choice(M_K0 + i, lbl[i], kt_names[keymap[i]],
+                  i == 6 || i == 7 ? "ZL / ZR: New 3DS and New 2DS XL only.\nD-pad and Circle Pad: the GBA D-pad." :
+                  "Turbo: presses it 15 times a second.\nD-pad and Circle Pad: the GBA D-pad.");
+         }
+         mrow_add(M_KRESET, ROW_ACTION, "Reset buttons", "A, B, L, R, START, SELECT as on the GBA;\nY fast forward; X, ZL, ZR nothing.");
+         break;
+      }
+      case 5:
       {
          static char about[40];
          mrow_toggle(M_CORE2, "Draw on core 2", video_thread_enabled, "Draw the picture on the 3DS's second\nCPU core. Needed for 3D, faster.");
@@ -2987,6 +3127,36 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
       case M_SKIP:     opt_frameskip ^= 1; break;
       case M_ASTRETCH: opt_audio_stretch ^= 1; break;
       case M_FFMODE:   opt_ff_toggle ^= 1; ff_on = false; break;
+      case M_K0: case M_K1: case M_K2: case M_K3: case M_K4:
+      case M_K5: case M_K6: case M_K7: case M_K8: case M_K9:
+      {
+         int v = keymap[id - M_K0];
+         CYCLEV(v, KT_COUNT);
+         keymap[id - M_K0] = (u8)v;
+         ff_on = false;
+         if (keys_pergame)
+            keys_save_game();
+         else
+            memcpy(keymap_global, keymap, NKEYS);
+         break;
+      }
+      case M_KPERGAME:
+      {
+         char p[600];
+         if (keys_pergame)
+         {
+            /* back to the all-games buttons; forget this game's own */
+            keys_path(p, sizeof(p));
+            remove(p);
+            memcpy(keymap, keymap_global, NKEYS);
+            keys_pergame = false;
+            break;
+         }
+         memcpy(keymap_global, keymap, NKEYS);   /* the current ones are the all-games ones too */
+         keys_pergame = true;
+         keys_save_game();
+         break;
+      }
       case M_FFSPEED:  CYCLEV(opt_ff_speed, 4); break;
       case M_RTC:      CYCLEV(opt_rtc, 3); break;
       case M_RTCDAYS:  STEP(opt_rtc_days, -365, 365, 1); rtc_offset_apply(); break;
@@ -3053,7 +3223,7 @@ static void log_session(void)
 
 static bool game_menu(void)
 {
-   static int tab, sel_of_tab[MENU_NTABS] = { 0, 0, 0, 0, 0 }, scroll_of_tab[MENU_NTABS];
+   static int tab, sel_of_tab[MENU_NTABS] = { 0 }, scroll_of_tab[MENU_NTABS];
    static ui_row rows[MENU_MAXROWS];
    char note[64] = "";
    int note_ok = 1, i;
@@ -3286,6 +3456,15 @@ static bool game_menu(void)
                   opt_colorcorr = 0; opt_sat = 100; opt_bright = 100;
                   preview_later(true);
                   snprintf(note, sizeof(note), "Colours back to Original");
+                  break;
+               case M_KRESET:
+                  memcpy(keymap, keymap_default, NKEYS);
+                  ff_on = false;
+                  if (keys_pergame)
+                     keys_save_game();
+                  else
+                     memcpy(keymap_global, keymap, NKEYS);
+                  snprintf(note, sizeof(note), "Buttons back to the GBA layout");
                   break;
                case M_3DRESET:
                   d3.pct = 100; d3.style = 0; d3.sprite = 0; d3.focus = 0; d3.smart = 1; d3.fast = 0; d3.tilt = 0;
@@ -3627,12 +3806,12 @@ static void run_game(void)
          bool ff;
          if (opt_ff_toggle)
          {
-            if (hidKeysDown() & KEY_Y)
+            if (hidKeysDown() & keys_ff_mask())
                ff_on = !ff_on;
             ff = ff_on;
          }
          else
-            ff = (keys_held & KEY_Y) != 0;
+            ff = (keys_held & keys_ff_mask()) != 0;
          if (ff)
          {
             int extra = 0, want = opt_ff_speed ? opt_ff_speed : 15;
@@ -3692,6 +3871,7 @@ static void run_game(void)
       t_wait += svcGetSystemTick() - t2;
       frames++;
       frames_total++;
+      turbo_tick++;
       sess_frames++;
       if (!drawn)
          sess_skipped++;

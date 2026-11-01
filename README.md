@@ -45,6 +45,9 @@ raise the 3D slider. No RetroArch needed.
   app plays that game directly and closes when you quit.
 - **Screen effects**: Scanlines, LCD grid, Light scanlines, Light grid (like the
   GBA SP) and Dot matrix (Display -> Screen effect).
+- **Button mapping**: Keys tab in the menu. Each 3DS button (A, B, X, Y, L, R,
+  ZL, ZR, START, SELECT) can be any GBA button, Turbo A / Turbo B, fast forward or
+  nothing, for all games or per game. The D-pad and Circle Pad are the GBA D-pad.
 - **Overlays**: your own 400x240 PNG with see-through parts drawn over the game,
   such as a bezel (Display -> Overlay). Put it in `sdmc:/3ds/gpsp3d/overlay.png`,
   or `sdmc:/3ds/gpsp3d/overlays/<game name>.png` for one game (the name of the
@@ -142,7 +145,8 @@ in the store.
   **Game** (save/load state, slot, reset, guide, quit), **Display** (screen size,
   scaling, color), **3D** (effect, strength, layer style, per-layer depths,
   sprite pop, focus, floor tilt, smart layers; greyed out on a 2DS), **Speed** (frame skip,
-  audio when slow, fast forward) and **System** (core 2 drawing, GPU display, core 2 priority,
+  audio when slow, fast forward), **Keys** (what each 3DS button does: any GBA button, Turbo A/B or fast
+  forward, for all games or just this one) and **System** (core 2 drawing, GPU display, core 2 priority,
   **Real-time clock** (Auto / On / Off; On for Pokemon hacks whose clock isn't found),
   **Clock adjust** (days and hours added to the 3DS clock, for a console whose clock is
   wrong; the menu shows the time the game will see),

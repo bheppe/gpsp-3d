@@ -98,16 +98,39 @@ static void draw_slider(int y, int h, const ui_row *r, int sel)
                  r->disabled ? C_DIM : C_TEXT);
 }
 
+/* tab widths follow their labels (bold, as when selected), the spare
+ * width shared out evenly */
+#define MAX_TABS 8
+static void tab_layout(const ui_menu *m, int *xs, int *ws)
+{
+   int i, used = 0, spare, x = 0, n = m->ntabs < MAX_TABS ? m->ntabs : MAX_TABS;
+   for (i = 0; i < n; i++)
+   {
+      ws[i] = ui_text_w(&ui_font_bold, m->tabs[i]);
+      used += ws[i];
+   }
+   spare = UI_W - used;
+   for (i = 0; i < n; i++)
+   {
+      int add = spare / (n - i);
+      spare -= add;
+      ws[i] += add;
+      xs[i] = x;
+      x += ws[i];
+   }
+}
+
 void scr_menu(const ui_menu *m)
 {
-   int i, tw = UI_W / m->ntabs;
+   int i, xs[MAX_TABS], ws[MAX_TABS];
+   tab_layout(m, xs, ws);
    ui_clear(C_BG);
 
    /* tabs */
    ui_vgradient(0, 0, UI_W, MENU_TAB_H, C_BG2, C_BG);
-   for (i = 0; i < m->ntabs; i++)
+   for (i = 0; i < m->ntabs && i < MAX_TABS; i++)
    {
-      int x = i * tw;
+      int x = xs[i], tw = ws[i];
       int on = i == m->tab;
       if (on)
       {
@@ -180,9 +203,16 @@ ui_hit scr_menu_hit(const ui_menu *m, int x, int y)
    ui_hit h = { HIT_NONE, 0, 0, ZONE_LABEL, 0 };
    if (y < MENU_TAB_H)
    {
+      int xs[MAX_TABS], ws[MAX_TABS], i;
+      tab_layout(m, xs, ws);
       h.what = HIT_TAB;
-      h.tab = x / (UI_W / m->ntabs);
-      if (h.tab >= m->ntabs) h.tab = m->ntabs - 1;
+      h.tab = m->ntabs - 1;
+      for (i = 0; i < m->ntabs && i < MAX_TABS; i++)
+         if (x < xs[i] + ws[i])
+         {
+            h.tab = i;
+            break;
+         }
       return h;
    }
    if (y >= MENU_LIST_Y && y < MENU_LIST_Y + MENU_ROWS_VIS * MENU_ROW_H)

@@ -61,7 +61,7 @@ What's been reported, what's done, and what's next. Reports come from
 | **Profiler no longer writes to the SD card while playing** (it wrote every 5 s with Show stats on) | bheppe | 🧪 |
 | `OPT=-O3` test build of the app code (the core is already -O3) | Gaming4LifeDE (Discord) | ✅ measured on Mario Kart: no difference, stays -O2 |
 
-**gpSP 3D v0.1.6: menu fixes, clock adjust, screen effects, overlays, update check**
+**gpSP 3D v0.1.6: menu fixes, clock adjust, screen effects, overlays, update check, button mapping**
 
 | Change | Asked by | Status |
 |---|---|---|
@@ -74,6 +74,7 @@ What's been reported, what's done, and what's next. Reports come from
 | **Update check**: at startup (with Wi-Fi) asks GitHub for the latest release and says so at the bottom of the game list and in System -> Version; System -> Check for updates turns it off | DukeOfJelly (Discord) | 🧪 |
 | **More screen effects**: Light scanlines, Light grid (GBA SP), Dot matrix | King_Hikikomori (Reddit) | 🧪 |
 | **Overlays**: your own 400x240 PNG over the game (`overlay.png`, or `overlays/<game>.png` per game) | King_Hikikomori (Reddit) | 🧪 |
+| **Button mapping** (Keys tab): each 3DS button -> any GBA button, Turbo A/B, fast forward or nothing; all games or per game | Strange_Wall_4062, Ferhath2015 (Reddit) | 🧪 |
 
 **Snes9x 3D v1.61-layers8: controls** ([snes9x_3ds](https://github.com/bheppe/snes9x_3ds))
 
