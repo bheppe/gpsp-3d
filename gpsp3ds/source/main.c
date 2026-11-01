@@ -2853,8 +2853,11 @@ static void menu_build(int tab)
                   st == UPD_CURRENT ? "You have the latest version." :
                   st == UPD_CHECKING ? "Checking..." :
                   st == UPD_OFFLINE ? "No Wi-Fi when gpSP 3D started, so it\ndidn't check. Checks again next start." :
-                  st == UPD_FAILED  ? "Couldn't reach GitHub. Checks again\nnext start." :
+                  st == UPD_FAILED  ? "" :
                                       "Checks when gpSP 3D starts (needs Wi-Fi).");
+               if (opt_update && st == UPD_FAILED)
+                  snprintf(upd_help, sizeof(upd_help), "Couldn't reach GitHub (%s:\n%.50s). Off/On retries.",
+                           update_method(), update_error());
                if (opt_update && st == UPD_NEWER)
                   snprintf(upd_help, sizeof(upd_help), "Version %s is out. Update it in\nUniversal-Updater (or FBI, see GitHub).", update_latest());
                mrow_choice(M_UPDATE, "Check for updates", opt_update ? "On" : "Off", upd_help);

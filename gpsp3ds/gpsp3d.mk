@@ -35,6 +35,21 @@ LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 LIBS     := -lgpsp -lcitro3d -lctru -lm
 LIBDIRS  := $(TOPDIR)/lib $(CTRULIB)
 
+# libcurl (devkitPro's 3ds-curl: in the devkitPro shell, pacman -S 3ds-curl)
+# for the update check: the 3DS's own HTTPS can't reach GitHub. Without it the
+# app still builds, and the check tries the 3DS's own HTTPS.
+ifneq ($(wildcard $(PORTLIBS)/lib/libcurl.a),)
+CURL_PC  := $(PORTLIBS)/bin/arm-none-eabi-pkg-config
+CURL_LIBS := $(if $(wildcard $(CURL_PC)),$(shell $(CURL_PC) --libs --static libcurl 2>/dev/null))
+CURL_LIBS := $(if $(strip $(CURL_LIBS)),$(CURL_LIBS),-lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz)
+CFLAGS   += -DHAVE_CURL
+LIBS     := $(filter-out -lctru -lm,$(CURL_LIBS)) $(LIBS)
+LIBDIRS  := $(PORTLIBS) $(LIBDIRS)
+$(info update check: libcurl)
+else
+$(info update check: no libcurl (pacman -S 3ds-curl), using the 3DS's own HTTPS)
+endif
+
 #---------------------------------------------------------------------------------
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 #---------------------------------------------------------------------------------
