@@ -36,9 +36,10 @@ RUN git clone https://github.com/3DSGuy/Project_CTR.git /tmp/Project_CTR \
 
 FROM ${DEVKITARM_IMAGE}
 
-# Icon Maker decodes JPEGs with libjpeg-turbo and PNGs with libpng; the
-# pinned image has both, this makes sure (and installs nothing then)
-RUN dkp-pacman -S --needed --noconfirm 3ds-libjpeg-turbo 3ds-libpng
+# Icon Maker decodes JPEGs with libjpeg-turbo and PNGs with libpng; gpSP 3D's
+# update check uses libcurl. The pinned image has them, this makes sure (and
+# installs nothing then)
+RUN dkp-pacman -S --needed --noconfirm 3ds-libjpeg-turbo 3ds-libpng 3ds-curl
 
 # Host tools: a native compiler and Python for the PC tests (iconmaker/test) and
 # gpsp3ds/tools/make_font.py, plus git, gh and ssh for working in the container.

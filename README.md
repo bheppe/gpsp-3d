@@ -213,7 +213,8 @@ no background) and back; the bottom screen shows which is on.
 Without any pictures, a game gets a cartridge icon with its name on the label.
 To use your own, put them next to the game: `Pokemon Emerald.png` (or `.jpg`)
 for the icon (any size; it's also what goes on the 3D tile) and
-`Pokemon Emerald.banner.png` (or `.jpg`) for a flat banner (best 256x128).
+`Pokemon Emerald.banner.png` (or `.jpg`) for your own banner (best 256x128;
+a game with one always uses it, also when the 3D banner is chosen).
 A picture of another shape, like most box art, is **padded** to fit by default;
 **X** on the Games tab switches to **cropping** it (scaled to fill, the edges
 cut off) and back. This applies to the icon, the 3D tile and the banner, and

@@ -45,7 +45,7 @@
 #include "fwd_gpsp3d_bin.h"
 #include "fwd_gpsp3d_3d_bin.h"
 
-#define ICONMAKER_VERSION "0.1.5"
+#define ICONMAKER_VERSION "0.1.6"
 #define MAX_ENTRIES 1024
 #define MAX_ICONS   300
 #define LAST_DIR    "sdmc:/3ds/gpsp3d/iconmaker_dir.txt"
@@ -873,6 +873,7 @@ typedef struct
    char title[64];
    int sys;
    bool has_icon_png, has_banner_png;
+   bool flat;                    /* a flat banner (its .banner picture, or SELECT), not 3D */
    bool icon_too_big, banner_too_big;   /* a picture too big to use, */
    int icon_big[2], banner_big[2];      /* and its size (0 x 0: not known) */
 } game_art;
@@ -906,10 +907,13 @@ static void make_art(const char *path, const entry *e, game_art *a)
       image_fit(a->icon48, 48, 48, a->label, 128, 128);
    }
    tm_mark("icon: scale to 48x48");
-   /* the 3D banner shows neither a banner picture nor the flat banner */
+   /* A game's own .banner picture always wins: it's shown flat, also when
+    * 3D is chosen (3D is for the games without one). Without one, the 3D
+    * banner needs no flat banner. */
    a->has_banner_png = e->pic[1] >= 0;
    a->banner_too_big = false;
-   if (banner_style != STYLE_3D)
+   a->flat = banner_style != STYLE_3D;
+   if (a->flat || e->pic[1] >= 0)
    {
       banner_png = load_picture(path, ".banner", e->pic[1], 256, 128, &bw, &bh, &big);
       a->has_banner_png = banner_png != NULL;
@@ -920,8 +924,9 @@ static void make_art(const char *path, const entry *e, game_art *a)
       {
          fit_picture(banner_png, bw, bh, a->banner, 256, 128);
          stbi_image_free(banner_png);
+         a->flat = true;
       }
-      else                             /* the icon, bigger, and the name */
+      else if (a->flat)                /* the icon, bigger, and the name */
       {
          default_banner(a->title, a->label, 128, 128, a->banner,
                         banner_style == STYLE_CLEAR ? BANNER_CLEAR : 0);
@@ -929,7 +934,7 @@ static void make_art(const char *path, const entry *e, game_art *a)
       }
       tm_mark("flat banner");
    }
-   else
+   if (!a->flat)
    {
       name_strip(a->title, sys, a->name);
       tm_mark("3D: name strip");
@@ -964,14 +969,17 @@ static int make_icon(const char *path, const entry *e, char *err, int errlen)
    char longt[160];
    const u8 *tsmdh;
    u8 *cia;
-   bool three_d = banner_style == STYLE_3D;
-   const u8 *tpl = three_d ? fwd_gpsp3d_3d_bin : fwd_gpsp3d_bin;
-   u32 size = three_d ? fwd_gpsp3d_3d_bin_size : fwd_gpsp3d_bin_size, written;
+   bool three_d;
+   const u8 *tpl;
+   u32 size, written;
    fwdcia_params p;
    Handle h;
    Result r;
 
    make_art(path, e, &art);
+   three_d = !art.flat;
+   tpl = three_d ? fwd_gpsp3d_3d_bin : fwd_gpsp3d_bin;
+   size = three_d ? fwd_gpsp3d_3d_bin_size : fwd_gpsp3d_bin_size;
    snprintf(longt, sizeof(longt), "%.110s (%s)", art.title, systems[sys].name);
 
    cia = malloc(size);
@@ -1311,7 +1319,7 @@ static void draw_top_game(const game_art *a, bool installed)
    top_bg();
    ui_text(&ui_font_small, 32, 6, "HOME Menu preview", C_DIM, 0);
    ui_rrect_outline(30, 22, 260, 132, 6, 1, C_FAINT);
-   if (banner_style == STYLE_3D)
+   if (!a->flat)
    {
       /* the 3D banner: the icon on its tile, the name strip under it (half size) */
       static u8 half[128 * 32 * 4];
@@ -1343,12 +1351,12 @@ static void draw_top_game(const game_art *a, bool installed)
               : !a->has_icon_png ? "Icon: made from the name"
               : fit_mode == FIT_CROP ? "Icon: its picture, cropped (X)" : "Icon: its picture, padded (X)",
               a->icon_too_big ? C_WARN : C_DIM, 0);
-      ui_text(&ui_font_small, 96, 201, banner_style != STYLE_3D && a->banner_too_big ? big[1]
-              : a->has_banner_png && banner_style != STYLE_3D ? (fit_mode == FIT_CROP ? "Banner: its .banner picture, cropped (X)"
-                                                                                      : "Banner: its .banner picture, padded (X)")
+      ui_text(&ui_font_small, 96, 201, a->banner_too_big ? big[1]
+              : a->has_banner_png && a->flat ? (fit_mode == FIT_CROP ? "Banner: its .banner picture, cropped (X)"
+                                                                     : "Banner: its .banner picture, padded (X)")
               : banner_style == STYLE_3D ? "Banner: 3D, the icon turns (SELECT)"
               : banner_style == STYLE_CLEAR ? "Banner: no background (SELECT)" : "Banner: blue background (SELECT)",
-              banner_style != STYLE_3D && a->banner_too_big ? C_WARN : C_DIM, 0);
+              a->banner_too_big ? C_WARN : C_DIM, 0);
    }
    {
       char opens[80];

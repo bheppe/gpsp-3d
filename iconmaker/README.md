@@ -13,8 +13,9 @@ in [Snes9x 3D](https://github.com/bheppe/snes9x_3ds).
    The top screen banner is 3D by default: the icon on a rounded tile that turns and
    bobs, the game's name under it, and a soft chime. SELECT on the Games tab switches
    between that and a flat banner (blue, or no background), and the choice is saved.
-   A flat banner can come from `Golf.banner.png` or `.jpg` (best 256x128);
-   without one it's the icon, bigger, with the game's name.
+   A game with its own banner picture, `Golf.banner.png` or `.jpg` (best 256x128),
+   always gets that picture as its banner, also when 3D is chosen (3D is for the
+   games without one). A flat banner without one is the icon, bigger, with the name.
    A picture of another shape (most box art isn't square) is padded to fit by
    default: the margins are white on the icon (HOME Menu icons have no
    transparency), the tile's grey on the 3D banner, and see-through on a flat
