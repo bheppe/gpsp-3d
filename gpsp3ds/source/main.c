@@ -151,6 +151,7 @@ static int opt_ff_toggle = 0;
 static int opt_ff_speed = 0;
 static bool ff_on;               /* toggle mode: fast forward is on */
 static int opt_rtc;           /* real-time clock: 0 Auto (the core decides), 1 On, 2 Off */
+static int opt_rtc_days, opt_rtc_hours;   /* added to the 3DS clock for the game (a wrong 3DS clock) */
 static int opt_intro;         /* 1: start games with the GBA intro (needs the user's gba_bios.bin) */
 static int opt_bottom;        /* bottom screen while playing: 0 simple, 1 performance stats, 2 off after 10 s */
 static int opt_slot;          /* save-state slot 0..9 */
@@ -203,6 +204,8 @@ static int opt_gpu_test;    /* diagnostics: 0 Full, 1 No draw, 2 No upload */
 static bool stereo_mode;    /* top screen currently in 3D mode */
 static bool wide_mode;      /* top screen in its 800px mode (2D at Fit / Stretch) */
 static bool wide_allowed = true;   /* false on Old 2DS, which has no 800px mode */
+static bool has_3d_screen = true;  /* false on Old 2DS and New 2DS XL */
+static const char *sys_model_name = "3DS";
 static bool slider_flat;    /* 3D slider all the way down: show 2D */
 /* bytes of one top-screen framebuffer (twice as many columns in 800px mode) */
 #define TOP_FB_BYTES ((wide_mode ? 2u : 1u) * TOP_W * TOP_H * 2)
@@ -347,6 +350,10 @@ static void config_load(void)
          opt_ff_speed = clampi(atoi(eq), 0, 3);
       else if (!strcmp(line, "rtc"))
          opt_rtc = clampi(atoi(eq), 0, 2);
+      else if (!strcmp(line, "rtc_days"))
+         opt_rtc_days = clampi(atoi(eq), -365, 365);
+      else if (!strcmp(line, "rtc_hours"))
+         opt_rtc_hours = clampi(atoi(eq), -23, 23);
       else if (!strcmp(line, "startup_intro"))
          opt_intro = atoi(eq) ? 1 : 0;
       else if (!strcmp(line, "bottom"))
@@ -413,10 +420,10 @@ static void config_save(void)
       return;
    fprintf(f, "last_dir=%s\nframe_skip=%d\nprofiler=%d\ncolor_style=%d\ncore2=%d\ndisplay=%d\ngpu=%d\n"
          "slot=%d\nscaling=%d\naudio_stretch=%d\ncore2_low_prio=%d\nsaturation=%d\nbrightness=%d\n3d_gap_fill=%d\nscreen_effect=%d\n"
-         "ff_toggle=%d\nff_speed=%d\nrtc=%d\nstartup_intro=%d\nbottom=%d\n",
+         "ff_toggle=%d\nff_speed=%d\nrtc=%d\nrtc_days=%d\nrtc_hours=%d\nstartup_intro=%d\nbottom=%d\n",
          cur_dir, opt_frameskip, opt_profiler, opt_colorcorr, opt_core2, opt_display, opt_gpu,
          opt_slot, opt_smooth, opt_audio_stretch, opt_lowprio, opt_sat, opt_bright, opt_gapfill, opt_crt,
-         opt_ff_toggle, opt_ff_speed, opt_rtc, opt_intro, opt_bottom);
+         opt_ff_toggle, opt_ff_speed, opt_rtc, opt_rtc_days, opt_rtc_hours, opt_intro, opt_bottom);
    /* no menu entries for these: written even when empty so they can be found */
    fprintf(f, "save_dir=%s\nstate_dir=%s\nsave_ext=%s\n", opt_save_dir, opt_state_dir, opt_save_ext);
    /* the all-games 3D settings (a game with its own profile keeps them aside) */
@@ -1218,7 +1225,7 @@ static void slider_flat_update(void)
 static void mode_wanted(bool *want3d, bool *wide)
 {
    slider_flat_update();
-   *want3d = d3.on && video_thread_enabled && !slider_flat;
+   *want3d = has_3d_screen && d3.on && video_thread_enabled && !slider_flat;
    /* 2D at Fit / Stretch: the 800px mode, for exact 3x columns at Fit */
    *wide = !*want3d && wide_allowed && opt_display != 0;
 }
@@ -1506,6 +1513,12 @@ static u32    log_dropped;
 extern bool prof_defer_log;
 void prof_flush_log(void);
 void prof_log_line(const char *line);
+void rtc_set_offset(s64 seconds);   /* gba_memory.c */
+
+static void rtc_offset_apply(void)
+{
+   rtc_set_offset(((s64)opt_rtc_days * 24 + opt_rtc_hours) * 3600);
+}
 #ifndef GPSP3D_OPT
 #define GPSP3D_OPT "-O2"
 #endif
@@ -2204,6 +2217,7 @@ static bool game_load(void)
       info.path = unzipped;
    }
    vars_changed = true;
+   rtc_offset_apply();
    if (!retro_load_game(&info))
       return false;
    game_loaded = true;
@@ -2216,7 +2230,10 @@ static bool game_load(void)
    guide_open(rom_path, rom_name, APP_DIR);
    {
       char line[400];
-      snprintf(line, sizeof(line), "--- gpSP 3D %s, app code %s, %s", GPSP3D_VERSION, GPSP3D_OPT, rom_name);
+      snprintf(line, sizeof(line), "--- gpSP 3D %s, app code %s, %s, 3D %s (strength %d%%, %s), %s",
+               GPSP3D_VERSION, GPSP3D_OPT, rom_name,
+               !has_3d_screen ? "none (2DS)" : d3.on ? "on" : "off", d3.pct,
+               d3_style_names[d3.style], sys_model_name);
       prof_log_line(line);
    }
    log_flush();   /* warnings from loading, before the game starts */
@@ -2484,9 +2501,9 @@ enum {
    /* 3D */
    M_3D, M_3DPCT, M_3DMETHOD, M_3DSMART, M_3DSTYLE, M_L0, M_L1, M_L2, M_L3, M_SPRITE, M_FOCUS, M_TILT, M_GAPFILL, M_PERGAME, M_3DRESET,
    /* Speed */
-   M_SKIP, M_ASTRETCH, M_FFMODE, M_FFSPEED, M_STATS,
+   M_SKIP, M_ASTRETCH, M_FFMODE, M_FFSPEED,
    /* System */
-   M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_RTC, M_INTRO, M_BOTTOM, M_SAVEINFO, M_ABOUT, M_CREDITS,
+   M_CORE2, M_GPU, M_PRIO, M_C2TEST, M_RTC, M_RTCDAYS, M_RTCHOURS, M_INTRO, M_BOTTOM, M_SAVEINFO, M_ABOUT, M_CREDITS,
    M_HDR
 };
 
@@ -2596,10 +2613,14 @@ static void menu_build(int tab)
          break;
       case 2:
       {
-         int dis = !d3.on;
-         mrow_toggle(M_3D, "3D effect", d3.on, video_thread_enabled ?
+         int dis = !d3.on || !has_3d_screen;
+         mrow_toggle(M_3D, "3D effect", d3.on && has_3d_screen, !has_3d_screen ?
+               "This system has no 3D screen (2DS),\nso there is nothing to set here." :
+               video_thread_enabled ?
                "Each GBA layer at its own depth. Use the\n3DS 3D slider for the amount." :
                "Needs System > Draw on core 2 On.");
+         if (!has_3d_screen)
+            mrows[mrow_n - 1].r.disabled = 1;
          mrow_slider(M_3DPCT, "Strength", d3.pct, 0, 200, "%d%%", "How far the layers separate, on top of\nthe 3D slider. 100% = normal.");
          mrow_choice(M_3DMETHOD, "Method", d3.fast ? "Experimental" : "Normal", d3.fast ?
                "Experimental: draw once, move each layer's\npixels. Usually slower on a 3DS." :
@@ -2627,7 +2648,7 @@ static void menu_build(int tab)
          {
             int i;
             for (i = 1; i < mrow_n; i++)
-               if (mrows[i].id != M_PERGAME && mrows[i].id != M_HDR)
+               if ((mrows[i].id != M_PERGAME || !has_3d_screen) && mrows[i].id != M_HDR)
                   mrows[i].r.disabled = dis;
          }
          break;
@@ -2642,7 +2663,6 @@ static void menu_build(int tab)
             mrow_choice(M_FFSPEED, "Fast forward speed", speeds[opt_ff_speed],
                         "Max: as fast as the 3DS can go (light\ngames: 2-4x on Old 3DS, more on New).");
          }
-         mrow_toggle(M_STATS, "Show stats", opt_profiler, "Timing numbers on this screen while\nplaying.");
          break;
       case 4:
       {
@@ -2655,8 +2675,22 @@ static void menu_build(int tab)
          {
             static const char *const rtc_names[] = { "Auto", "On", "Off" };
             static const char *const bottom_names[] = { "Simple", "Performance", "Off after 10 s" };
+            static char clock_help[96];
             mrow_choice(M_RTC, "Real-time clock", rtc_names[opt_rtc],
                   "On: for Pokemon hacks that say the internal\nbattery has run dry. Applies when a game starts.");
+            {
+               /* the clock the game sees: the 3DS clock plus the adjustment */
+               time_t t = time(NULL) + ((time_t)opt_rtc_days * 24 + opt_rtc_hours) * 3600;
+               struct tm *tm = gmtime(&t);
+               char when[40] = "";
+               if (tm)
+                  strftime(when, sizeof(when), "%a %b %d %Y, %I:%M %p", tm);
+               snprintf(clock_help, sizeof(clock_help), "Game clock: %s\n(if the 3DS clock is wrong, set it right here)", when);
+            }
+            mrow_slider(M_RTCDAYS, "Clock adjust: days", opt_rtc_days, -365, 365, "%+d", clock_help);
+            mrow_slider(M_RTCHOURS, "Clock adjust: hours", opt_rtc_hours, -23, 23, "%+d", clock_help);
+            if (opt_rtc == 2)
+               mrows[mrow_n - 1].r.disabled = mrows[mrow_n - 2].r.disabled = 1;
             mrow_choice(M_INTRO, "Startup", opt_intro ? "GBA intro" : "Skip intro",
                   "GBA intro needs your own gba_bios.bin in\nsdmc:/3ds/gpsp3d/. Applies when a game starts.");
             mrow_choice(M_BOTTOM, "Bottom screen", bottom_names[opt_bottom],
@@ -2781,9 +2815,10 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
       case M_FFMODE:   opt_ff_toggle ^= 1; ff_on = false; break;
       case M_FFSPEED:  CYCLEV(opt_ff_speed, 4); break;
       case M_RTC:      CYCLEV(opt_rtc, 3); break;
+      case M_RTCDAYS:  STEP(opt_rtc_days, -365, 365, 1); rtc_offset_apply(); break;
+      case M_RTCHOURS: STEP(opt_rtc_hours, -23, 23, 1); rtc_offset_apply(); break;
       case M_INTRO:    opt_intro ^= 1; break;
       case M_BOTTOM:   CYCLEV(opt_bottom, 3); break;
-      case M_STATS:    opt_profiler ^= 1; vars_changed = true; break;
       case M_CORE2:
          opt_core2 ^= 1;
          core2_apply();
@@ -2823,6 +2858,23 @@ static const char *menu_change(int id, int dir, bool has_value, int value)
 }
 
 /* returns false to leave the game */
+/* for compatibility reports: frames played and skipped since the menu was
+ * last opened, written to the log (gpsp3d.log) when it opens */
+static u32 sess_frames, sess_skipped;
+
+static void log_session(void)
+{
+   char line[160];
+   if (!sess_frames)
+      return;
+   snprintf(line, sizeof(line), "played %lu frames (%lu s), skipped %lu (%.1f%%), 3D %s",
+            (unsigned long)sess_frames, (unsigned long)(sess_frames / 60), (unsigned long)sess_skipped,
+            sess_skipped * 100.0 / sess_frames,
+            !has_3d_screen ? "none (2DS)" : stereo_mode ? "on" : "off (or 3D slider down)");
+   prof_log_line(line);
+   sess_frames = sess_skipped = 0;
+}
+
 static bool game_menu(void)
 {
    static int tab, sel_of_tab[MENU_NTABS] = { 0, 0, 0, 0, 0 }, scroll_of_tab[MENU_NTABS];
@@ -2831,6 +2883,10 @@ static bool game_menu(void)
    int note_ok = 1, i;
    bool redraw = true, touch_down = true;   /* the touch that opened the menu */
    int drag_row = -1, touch_y0 = 0, touch_moved = 0;
+   /* a tap on a toggle/choice/button acts when the finger lifts without
+    * having moved, so dragging the list doesn't change what it starts on */
+   int tap_id = 0, tap_dir = 0, tap_row = -1;
+   bool tap_activate = false;
    float last_slider = osGet3DSliderState();
    ui_menu m;
 
@@ -2838,6 +2894,7 @@ static bool game_menu(void)
    if (audio_ok)
       ndspChnSetPaused(0, true);
    sram_flush(false);
+   log_session();
    log_flush();
    confirm_id = 0;
 
@@ -2904,6 +2961,7 @@ static bool game_menu(void)
             touch_y0 = tp.py;
             touch_moved = 0;
             drag_row = -1;
+            tap_id = 0; tap_dir = 0; tap_row = -1; tap_activate = false;
             if (h.what == HIT_TAB && h.tab != tab)
             {
                sel_of_tab[tab] = sel;
@@ -2921,17 +2979,18 @@ static bool game_menu(void)
                   if (confirm_id != mrows[sel].id) confirm_id = 0;
                }
                redraw = true;
-               if (!r->disabled || mrows[sel].id == M_3D)
+               if (!r->disabled || (mrows[sel].id == M_3D && has_3d_screen))
                {
+                  tap_row = sel;
                   switch (h.zone)
                   {
-                     case ZONE_DEC:    act_id = mrows[sel].id; act_dir = -1; break;
-                     case ZONE_INC:    act_id = mrows[sel].id; act_dir = 1; break;
-                     case ZONE_TOGGLE: act_id = mrows[sel].id; act_dir = 1; break;
+                     case ZONE_DEC:    tap_id = mrows[sel].id; tap_dir = -1; break;
+                     case ZONE_INC:    tap_id = mrows[sel].id; tap_dir = 1; break;
+                     case ZONE_TOGGLE: tap_id = mrows[sel].id; tap_dir = 1; break;
                      case ZONE_SLIDER: act_id = mrows[sel].id; act_has_v = 1; act_v = h.slider_v; drag_row = sel; break;
                      default:
-                        if (r->kind == ROW_ACTION) activate = true;
-                        else if (r->kind == ROW_CHOICE) { act_id = mrows[sel].id; act_dir = 1; }
+                        if (r->kind == ROW_ACTION) tap_activate = true;
+                        else if (r->kind == ROW_CHOICE) { tap_id = mrows[sel].id; tap_dir = 1; }
                         break;
                   }
                }
@@ -2972,6 +3031,13 @@ static bool game_menu(void)
       }
       else
       {
+         if (touch_down && !touch_moved && tap_row >= 0 && tap_row == sel)
+         {
+            /* a tap, not a drag: now do what was tapped */
+            if (tap_id)  { act_id = tap_id; act_dir = tap_dir; }
+            if (tap_activate) activate = true;
+         }
+         tap_id = 0; tap_row = -1; tap_activate = false;
          touch_down = false;
          drag_row = -1;
       }
@@ -3060,7 +3126,7 @@ static bool game_menu(void)
          }
       }
 
-      if (act_id && (!mrows[sel].r.disabled || act_id == M_3D))
+      if (act_id && (!mrows[sel].r.disabled || (act_id == M_3D && has_3d_screen)))
       {
          const char *msg = menu_change(act_id, act_dir, act_has_v != 0, act_v);
          note[0] = 0; note_ok = 1; confirm_id = 0;
@@ -3450,6 +3516,9 @@ static void run_game(void)
       t_wait += svcGetSystemTick() - t2;
       frames++;
       frames_total++;
+      sess_frames++;
+      if (!drawn)
+         sess_skipped++;
 
       if ((frames_total & 127) == 0)
          sram_flush(false);
@@ -3479,7 +3548,8 @@ static void run_game(void)
             h.pictures = (float)(fps * drawn_win / (frames ? frames : 1));
             h.stereo = stereo_mode && stereo_amount_pct() > 0;
             h.depth_pct = stereo_amount_pct();
-            h.show_stats = opt_profiler;
+            h.show_stats = 1;
+            h.skipped = h.fps - h.pictures > 0.5f ? h.fps - h.pictures : 0;
             h.warning = audio_ok ? NULL : "No sound: dspfirm.cdc is missing";
             if (ff_shown)
             {
@@ -3591,8 +3661,18 @@ int main(int argc, char **argv)
       u8 model = 0;
       if (R_SUCCEEDED(cfguInit()))
       {
-         if (R_SUCCEEDED(CFGU_GetSystemModel(&model)) && model == CFG_MODEL_2DS)
-            wide_allowed = false;
+         if (R_SUCCEEDED(CFGU_GetSystemModel(&model)))
+         {
+            if (model == CFG_MODEL_2DS)
+               wide_allowed = false;
+            if (model == CFG_MODEL_2DS || model == CFG_MODEL_N2DSXL)
+               has_3d_screen = false;
+            {
+               static const char *const names[] = { "Old 3DS", "Old 3DS XL", "New 3DS", "Old 2DS", "New 3DS XL", "New 2DS XL" };
+               if (model < 6)
+                  sys_model_name = names[model];
+            }
+         }
          cfguExit();
       }
    }

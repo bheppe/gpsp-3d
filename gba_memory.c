@@ -1586,6 +1586,14 @@ s32 rtc_bit_count;
  * frame_counter wraps after ~2.27 years of continuous emulation. */
 static s64 rtc_base_time = 0;
 static rtc_time_source_type rtc_time_source = RTC_TIME_SOURCE_DETERMINISTIC;
+/* Added to the clock the game sees (frontend setting, for consoles whose
+ * own clock is wrong). */
+static s64 rtc_offset_seconds = 0;
+
+void rtc_set_offset(s64 seconds)
+{
+  rtc_offset_seconds = seconds;
+}
 
 void rtc_set_time_source(rtc_time_source_type source)
 {
@@ -1610,9 +1618,9 @@ static void rtc_init_base_time(void)
 static time_t rtc_current_time(void)
 {
   if (rtc_time_source == RTC_TIME_SOURCE_SYSTEM)
-    return time(NULL);
+    return (time_t)((s64)time(NULL) + rtc_offset_seconds);
 
-  return (time_t)(rtc_base_time +
+  return (time_t)(rtc_base_time + rtc_offset_seconds +
                   (s64)((double)frame_counter * GBA_FRAME_SECONDS));
 }
 

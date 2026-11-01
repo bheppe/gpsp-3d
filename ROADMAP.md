@@ -61,6 +61,17 @@ What's been reported, what's done, and what's next. Reports come from
 | **Profiler no longer writes to the SD card while playing** (it wrote every 5 s with Show stats on) | bheppe | 🧪 |
 | `OPT=-O3` test build of the app code (the core is already -O3) | Gaming4LifeDE (Discord) | ✅ measured on Mario Kart: no difference, stays -O2 |
 
+**gpSP 3D v0.1.6: menu, 2DS and clock fixes**
+
+| Change | Asked by | Status |
+|---|---|---|
+| **Menu touch scrolling** no longer changes the setting the drag starts on: taps act when the finger lifts (sliders still follow the finger) | Gaming4LifeDE (Discord) | 🧪 |
+| **Speed → Show stats removed**: it only worked with the Performance bottom screen; **System → Bottom screen → Performance** now always shows everything | Gaming4LifeDE (Discord) | 🧪 |
+| **2DS / New 2DS XL**: the 3D tab is greyed out ("no 3D screen") | Gaming4LifeDE (Discord) | 🧪 |
+| **Skipped frames** on the Performance screen; the log (`gpsp3d.log`) notes the console, 3D on/off and skipped frames, for compatibility reports | Gaming4LifeDE (Discord) | 🧪 |
+| **System → Clock adjust**: days and hours added to the 3DS clock for the game's real-time clock, for a console whose clock is wrong | Surge And Finn (Discord) | 🧪 |
+| **Game report form** on GitHub Issues (asks for console, 3D on/off, skipped frames) | Gaming4LifeDE (Discord) | 🧪 |
+
 **Snes9x 3D v1.61-layers8: controls** ([snes9x_3ds](https://github.com/bheppe/snes9x_3ds))
 
 | Change | Asked by | Status |
@@ -74,7 +85,7 @@ What's been reported, what's done, and what's next. Reports come from
 | Donkey Kong Country 2: thin white outline behind characters against the sky | margret (Discord) | 📋 needs investigating |
 | Tiny Toon Adventures: Buster Busts Loose in the Recommended list (as Auto) | SWChris (Discord) | 📋 needs its CRC32 |
 
-**gpSP 3D v0.1.6: performance and updates**
+**gpSP 3D v0.1.7: performance and updates**
 
 | Plan | Status |
 |---|---|
@@ -107,7 +118,7 @@ What's been reported, what's done, and what's next. Reports come from
 
 | # | Problem or request | Reported by | Status |
 |---|---|---|---|
-| 6 | **New 3DS: use the extra CPU cores** for drawing instead of sharing core 2 with the system | — | 📋 v0.1.6 |
+| 6 | **New 3DS: use the extra CPU cores** for drawing instead of sharing core 2 with the system | — | 📋 v0.1.7 |
 | 7 | Need for Speed Underground: ~4 fps on the title screen, then freezes | myownfriend (#2) | 🔧 needs the game to reproduce |
 | 8 | Stutter in Mario Golf: Advance Tour, Super Mario Galaxy (GBA port), NFS Underground; WarioWare: Twisted a little choppy on Old 3DS (smooth on New 3DS) | Discord, After-Pop-2000 (Reddit) | 🔧 Mario Golf: much better in v0.1.3 (RAM code rewrites cost about half), still slows down on the course view and the swing on Old 3DS. Galaxy port: 55% -> about 76% speed on Old 3DS; the rest needs a bigger dynarec change (register allocation), on hold. Pokémon GS Chronicles: fine |
 | 9 | Classic NES Series: Castlevania doesn't boot | Male_Inkling | 📋 |

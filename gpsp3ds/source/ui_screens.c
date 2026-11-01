@@ -293,8 +293,14 @@ void scr_hud(const ui_hud *h)
       int x = ui_text(&ui_font_big, 20, 48, buf, h->fps >= 58.5f ? C_GOOD : (h->fps >= 50 ? C_WARN : C_BAD), 0);
       ui_text(&ui_font_body, x + 4, 63, "fps", C_DIM, 0);
    }
-   snprintf(buf, sizeof(buf), "picture %.0f/s", h->pictures);
-   ui_text(&ui_font_small, 20, 88, buf, C_DIM, 0);
+   if (h->skipped >= 0.5f)
+   {
+      snprintf(buf, sizeof(buf), "skipped %.0f/s (%.0f%%)", h->skipped,
+               h->fps > 0 ? h->skipped * 100.0f / h->fps : 0.0f);
+      ui_text(&ui_font_small, 20, 88, buf, C_WARN, 130);
+   }
+   else
+      ui_text(&ui_font_small, 20, 88, "no frames skipped", C_DIM, 130);
 
    /* 3D card */
    ui_rrect(164, 40, 148, 70, 12, C_PANEL);

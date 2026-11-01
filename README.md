@@ -133,11 +133,14 @@ in the store.
 - **Menu:** tap the bottom screen while playing. Tabs:
   **Game** (save/load state, slot, reset, guide, quit), **Display** (screen size,
   scaling, color), **3D** (effect, strength, layer style, per-layer depths,
-  sprite pop, focus, floor tilt, smart layers), **Speed** (frame skip, audio when slow,
-  fast forward, stats) and **System** (core 2 drawing, GPU display, core 2 priority,
+  sprite pop, focus, floor tilt, smart layers; greyed out on a 2DS), **Speed** (frame skip,
+  audio when slow, fast forward) and **System** (core 2 drawing, GPU display, core 2 priority,
   **Real-time clock** (Auto / On / Off; On for Pokemon hacks whose clock isn't found),
+  **Clock adjust** (days and hours added to the 3DS clock, for a console whose clock is
+  wrong; the menu shows the time the game will see),
   **Startup** (skip or play the GBA intro, which needs your own `gba_bios.bin` in
-  `sdmc:/3ds/gpsp3d/`), **Bottom screen** (Simple / Performance / Off after 10 s),
+  `sdmc:/3ds/gpsp3d/`), **Bottom screen** (Simple / Performance, with the speed,
+  skipped frames and timing / Off after 10 s),
   **Save file** (where the current game's save is) and **Credits**).
 - **3D:** raise the 3DS 3D slider. **3D tab -> Strength** scales the effect.
   **3D tab -> Layer style** picks a preset. **3D tab -> Settings for** chooses
@@ -297,7 +300,8 @@ session. If it made your GBA games better, a tip helps keep fixes and
 new features coming: https://ko-fi.com/bheppe
 
 Bug reports and game test results help just as much. Post them under
-[Issues](../../issues) or on [Discord](https://discord.gg/pBWY3fRgnU). What's done and what's planned is in [ROADMAP.md](ROADMAP.md).
+[Issues](../../issues) (there's a **Game report** form: game, console, 3D on or off,
+speed and skipped frames from **System -> Bottom screen -> Performance**) or on [Discord](https://discord.gg/pBWY3fRgnU). What's done and what's planned is in [ROADMAP.md](ROADMAP.md).
 
 ## Credits and licenses
 

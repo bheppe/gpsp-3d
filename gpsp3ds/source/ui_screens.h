@@ -5,7 +5,7 @@
 
 #include "ui.h"
 
-#define GPSP3D_VERSION "0.1.5"
+#define GPSP3D_VERSION "0.1.6"
 
 enum { ROW_HEADER, ROW_ACTION, ROW_CHOICE, ROW_TOGGLE, ROW_SLIDER, ROW_INFO };
 
@@ -53,6 +53,7 @@ int  scr_browser_hit(int y, int top, int n);    /* index or -1 */
 typedef struct {
    const char *title;
    float fps, pictures;    /* emulated frames/s, drawn pictures/s */
+   float skipped;          /* frames/s not drawn (frame skip) */
    int stereo;             /* 3D shown */
    int depth_pct;          /* 3D strength incl. slider, for the badge */
    int show_stats;

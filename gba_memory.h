@@ -330,6 +330,7 @@ s32 load_bios(char *name);
 void init_memory(void);
 void init_gamepak_buffer(void);
 void rtc_set_time_source(rtc_time_source_type source);
+void rtc_set_offset(s64 seconds);
 bool gamepak_must_swap(void);
 void memory_term(void);
 u8 *load_gamepak_page(u32 physical_index);

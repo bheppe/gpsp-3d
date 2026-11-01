@@ -1,0 +1,66 @@
+name: Game report
+description: How a game runs in gpSP 3D (works, slow, glitches, 3D settings)
+title: "[Game] "
+labels: ["compatibility"]
+body:
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Name and region, or the ROM hack's name
+      placeholder: Pokemon Emerald (USA)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: gpSP 3D version
+      description: System tab -> Version
+      placeholder: v0.1.6
+    validations:
+      required: true
+  - type: dropdown
+    id: console
+    attributes:
+      label: Console
+      options: [Old 3DS, Old 3DS XL, Old 2DS, New 3DS, New 3DS XL, New 2DS XL]
+    validations:
+      required: true
+  - type: dropdown
+    id: three_d
+    attributes:
+      label: 3D while testing
+      description: The 3D tab's 3D effect, and whether the 3D slider was up
+      options: ["3D on, slider up", "3D on, slider down", "3D effect off", "2DS (no 3D screen)"]
+    validations:
+      required: true
+  - type: input
+    id: settings
+    attributes:
+      label: 3D settings (if 3D was on)
+      description: 3D tab -> Strength and Layer style, or your layer depths if Custom
+      placeholder: "100%, Flat map"
+  - type: dropdown
+    id: speed
+    attributes:
+      label: How it runs
+      options: ["Full speed", "Mostly full speed, slows in places", "Slow", "Doesn't start / crashes"]
+    validations:
+      required: true
+  - type: input
+    id: skipped
+    attributes:
+      label: Skipped frames
+      description: System -> Bottom screen -> Performance shows them while you play ("no frames skipped" or "skipped N/s"). The log also has them.
+      placeholder: "no frames skipped / skipped 6/s (10%) in battles"
+  - type: textarea
+    id: problems
+    attributes:
+      label: Problems or notes
+      description: Glitches, sound, saves, 3D that looks wrong. Photos help (screenshots can't show 3D).
+  - type: textarea
+    id: log
+    attributes:
+      label: gpsp3d.log (optional)
+      description: From sdmc:/3ds/gpsp3d/gpsp3d.log. Paste the lines from the session you tested.
+      render: text
