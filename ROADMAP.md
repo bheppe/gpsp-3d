@@ -111,9 +111,11 @@ What's been reported, what's done, and what's next. Reports come from
 
 | Plan | Status |
 |---|---|
-| **Box art download** from libretro-thumbnails (no account), matched by the ROM's CRC32, with a name search for other regions | 📋 Gaming4LifeDE, Surge, Finn (Discord) |
+| **Icon Maker: box art download** (L on the Games tab; L on a folder: every game without a picture) from libretro-thumbnails (no account), found in libretro's No-Intro list by file name or CRC32 (a zip's from the zip), other regions tried when its own has none | 🧪 Gaming4LifeDE, Surge, Finn (Discord) |
+| Ready-to-show copies of the thumbnails (saved at 128 px on the shorter side), so making a whole folder stays fast | 🧪 |
+| **Box art folder**: `boxart_dir=` in `iconmaker.cfg` (next to the game by default) | 🧪 michvllni (GitHub) |
+| **Your own box art libraries** (ROM hacks, translations): `boxart_source=` lines in `iconmaker.cfg`, laid out like libretro-thumbnails with a `list.txt` of CRC32s; tried before libretro | 🧪 michvllni (GitHub) |
 | Community art repo for original icons and banners (no copies of official box art) | 📋 |
-| Ready-to-show copies of the thumbnails, so making a whole folder stays fast | 📋 |
 
 **Later**
 

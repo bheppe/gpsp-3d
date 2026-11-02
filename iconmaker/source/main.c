@@ -14,6 +14,8 @@
  * another shape is padded (the default) or cropped to fit (X on the Games
  * tab). The top screen shows both before anything is made.
  *
+ * L downloads a game's box art from libretro-thumbnails (boxart.c) as its
+ * picture: Golf.png next to the game, or in boxart_dir (iconmaker.cfg).
  * Y makes icons for every game in a folder. The "My icons" tab lists the
  * icons made (here or by make-forwarders.sh) and deletes them.
  *
@@ -27,11 +29,15 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <malloc.h>
+#include <zlib.h>
 #include "fwdcia.h"
 #include "deficon.h"
 #include "ui.h"
 #include "pngshrink.h"
 #include "jpegshrink.h"
+#include "boxart.h"
+#include "netget.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -66,9 +72,25 @@ enum { FIT_PAD, FIT_CROP, FIT_COUNT };
 static const char *fit_key[FIT_COUNT] = { "pad", "crop" };
 static int fit_mode = FIT_PAD;
 
+/* Box art (L on the Games tab): saved as Golf.png next to the game, or in
+ * this folder (boxart_dir= in iconmaker.cfg, "" for next to the game);
+ * with the shorter side at least BOXART_SIDE, all the icon and tile need.
+ * From your own libraries first (boxart_source= lines, URLs laid out as
+ * boxart.h says), in their order, then libretro's. The game lists are
+ * kept in BOXART_LIST, a library's in BOXART_LIB_LIST (named by a CRC32
+ * of its URL); delete them to refresh. */
+#define BOXART_SOURCES 8
+static char boxart_dir[256];
+static char boxart_src[BOXART_SOURCES][256];
+static int nboxart_src;
+#define BOXART_SIDE      128
+#define BOXART_LIST      "sdmc:/3ds/gpsp3d/boxart_%s.txt"
+#define BOXART_LIB_LIST  "sdmc:/3ds/gpsp3d/boxart_%08lX_%s.txt"
+
 /* pic[0], pic[1]: the game's icon and banner picture, as an index into
- * pic_types, or -1 if there's none (found when the folder is read) */
-typedef struct { char name[256]; bool dir, has_icon; int sys; s8 pic[2]; } entry;
+ * pic_types, or -1 if there's none (found when the folder is read);
+ * pic_boxart: the icon picture is in boxart_dir */
+typedef struct { char name[256]; bool dir, has_icon, pic_boxart; int sys; s8 pic[2]; } entry;
 static const char *const pic_types[] = { "png", "jpg", "jpeg" };
 /* Pictures too big to use (an icon from the name instead, and a note): a
  * side over PIC_MAX_SIDE; a progressive JPEG whose coefficients would take
@@ -394,10 +416,11 @@ static int system_of(const char *path)
    return sys;
 }
 
-/* The pictures in the folder, by name: looking for a file that isn't there
- * costs about 60 ms on the SD card, so each game's are found once, here */
-static char **pics;
-static int npics, pics_room;
+/* The pictures in the folder (and in boxart_dir), by name: looking for a
+ * file that isn't there costs about 60 ms on the SD card, so each game's
+ * are found once, here */
+typedef struct { char **name; int n, room; } name_list;
+static name_list pics, boxart_pics;
 
 static bool is_picture(const char *name)
 {
@@ -409,19 +432,27 @@ static bool is_picture(const char *name)
    return false;
 }
 
-static void add_picture(const char *name)
+static void add_picture(name_list *l, const char *name)
 {
-   if (npics == pics_room)
+   if (l->n == l->room)
    {
-      int room = pics_room ? pics_room * 2 : 256;
-      char **p = realloc(pics, room * sizeof(char*));
+      int room = l->room ? l->room * 2 : 256;
+      char **p = realloc(l->name, room * sizeof(char*));
       if (!p)
          return;
-      pics = p;
-      pics_room = room;
+      l->name = p;
+      l->room = room;
    }
-   if ((pics[npics] = strdup(name)))
-      npics++;
+   if ((l->name[l->n] = strdup(name)))
+      l->n++;
+}
+
+static void clear_pictures(name_list *l)
+{
+   int i;
+   for (i = 0; i < l->n; i++)
+      free(l->name[i]);
+   l->n = 0;
 }
 
 static int cmp_name(const void *a, const void *b)
@@ -429,30 +460,59 @@ static int cmp_name(const void *a, const void *b)
    return strcasecmp(*(char *const*)a, *(char *const*)b);
 }
 
-/* each game's icon (Golf.png) and banner picture (Golf.banner.png), if any */
+static bool has_picture(const name_list *l, const char *want)
+{
+   return l->n && bsearch(&want, l->name, l->n, sizeof(char*), cmp_name);
+}
+
+/* the pictures in boxart_dir (read at the start and after downloads) */
+static void read_boxart_dir(void)
+{
+   DIR *d;
+   struct dirent *e;
+   clear_pictures(&boxart_pics);
+   if (!boxart_dir[0] || !(d = opendir(boxart_dir)))
+      return;
+   while ((e = readdir(d)))
+      if (e->d_type != DT_DIR && is_picture(e->d_name))
+         add_picture(&boxart_pics, e->d_name);
+   closedir(d);
+   qsort(boxart_pics.name, boxart_pics.n, sizeof(char*), cmp_name);
+}
+
+/* each game's icon (Golf.png) and banner picture (Golf.banner.png), if any;
+ * an icon picture in boxart_dir if there's none next to the game */
 static void find_pictures(void)
 {
    int i, k, t;
-   qsort(pics, npics, sizeof(char*), cmp_name);
+   qsort(pics.name, pics.n, sizeof(char*), cmp_name);
    for (i = 0; i < nentries; i++)
    {
       const char *name = entries[i].name, *dot = strrchr(name, '.');
       entries[i].pic[0] = entries[i].pic[1] = -1;
+      entries[i].pic_boxart = false;
       if (entries[i].dir || !dot)
          continue;
       for (k = 0; k < 2; k++)
          for (t = 2; t >= 0; t--)          /* png wins, as when they were opened in turn */
          {
             char want[300];
-            const char *key = want;
             snprintf(want, sizeof(want), "%.*s%s.%s", (int)(dot - name), name, k ? ".banner" : "", pic_types[t]);
-            if (bsearch(&key, pics, npics, sizeof(char*), cmp_name))
+            if (has_picture(&pics, want))
                entries[i].pic[k] = (s8)t;
          }
+      for (t = 2; t >= 0 && entries[i].pic[0] < 0; t--)
+      {
+         char want[300];
+         snprintf(want, sizeof(want), "%.*s.%s", (int)(dot - name), name, pic_types[t]);
+         if (has_picture(&boxart_pics, want))
+         {
+            entries[i].pic[0] = (s8)t;
+            entries[i].pic_boxart = true;
+         }
+      }
    }
-   for (i = 0; i < npics; i++)
-      free(pics[i]);
-   npics = 0;
+   clear_pictures(&pics);
 }
 
 static int cmp_entry(const void *a, const void *b)
@@ -479,7 +539,7 @@ static void read_dir(void)
    }
    if (!d)
       return;
-   npics = 0;
+   clear_pictures(&pics);
    while ((e = readdir(d)) && nentries < MAX_ENTRIES)
    {
       bool dir = e->d_type == DT_DIR;
@@ -489,7 +549,7 @@ static void read_dir(void)
          continue;
       if (!dir && is_picture(e->d_name))
       {
-         add_picture(e->d_name);
+         add_picture(&pics, e->d_name);
          continue;
       }
       snprintf(path, sizeof(path), "%s%s", cwd, e->d_name);
@@ -860,13 +920,15 @@ static void make_art(const char *path, const entry *e, game_art *a)
    const char *name = strrchr(path, '/') + 1, *dot = strrchr(name, '.');
    int n = (int)(dot - name), sys = e->sys, iw, ih, bw, bh;
    u8 *icon_png, *banner_png = NULL;
+   char boxart[800];
    bool big;
 
    snprintf(a->title, sizeof(a->title), "%.*s", n > 63 ? 63 : n, name);
    a->sys = sys;
    /* the picture comes decoded small (at least 128x128): the 3D tile and the
     * generated banner, and the icon, are made from it */
-   icon_png = load_picture(path, "", e->pic[0], 128, 128, &iw, &ih, &big);
+   snprintf(boxart, sizeof(boxart), "%s/%s", boxart_dir, name);
+   icon_png = load_picture(e->pic_boxart ? boxart : path, "", e->pic[0], 128, 128, &iw, &ih, &big);
    a->has_icon_png = icon_png != NULL;
    a->icon_too_big = big;
    a->icon_big[0] = iw;
@@ -1256,8 +1318,8 @@ static void draw_bottom(int tab, int sel, int top)
                     s ? C_TEXT : C_TEXT2, right);
       }
       draw_scrollbar(nentries, top);
-      draw_footer(entries[sel].dir || !nentries ? "A: open    Y: icons for every game here    R: My icons"
-                                                : "A: make icon    Y: whole folder    B: up    R: My icons");
+      draw_footer(entries[sel].dir || !nentries ? "A: open   Y: icons for all   L: box art for all   R: My icons"
+                                                : "A: make icon   L: box art   Y: folder   B: up   R: My icons");
    }
    else
    {
@@ -1468,7 +1530,7 @@ static bool dialog(const char *title, const char *body, const char *ok, const ch
    return false;
 }
 
-static void progress(const char *title, const char *line, int done, int n)
+static void progress_keys(const char *title, const char *line, int done, int n, const char *keys)
 {
    int y0 = 70, w = UI_W - 76;
    ui_clear(C_BG);
@@ -1479,8 +1541,13 @@ static void progress(const char *title, const char *line, int done, int n)
    ui_rrect(38, y0 + 66, w, 8, 4, C_TRACK);
    if (n > 0 && done > 0)
       ui_rrect(38, y0 + 66, w * done / n < 8 ? 8 : w * done / n, 8, 4, C_ACCENT);
-   draw_footer(n > 1 ? "Hold B to stop after this one" : "");
+   draw_footer(keys);
    ui_present();
+}
+
+static void progress(const char *title, const char *line, int done, int n)
+{
+   progress_keys(title, line, done, n, n > 1 ? "Hold B to stop after this one" : "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1553,6 +1620,281 @@ static void make_folder(void)
    }
 }
 
+/* ---- box art (L) ---- */
+
+#define SOC_SIZE 0x40000
+static u32 *soc_buf;
+/* per system: the libraries, then libretro (base NULL); each list loaded
+ * once and kept till the end */
+static boxart_source ba_src[SYS_COUNT][BOXART_SOURCES + 1];
+static bool ba_loaded[SYS_COUNT][BOXART_SOURCES + 1];
+static bool ba_skip[SYS_COUNT][BOXART_SOURCES + 1];  /* list failed: left out till the next L */
+static const char *ba_name;                   /* the game being done, */
+static int ba_i, ba_n;                        /* which of how many */
+static u64 ba_drawn;
+#ifdef ICONMAKER_TIMING
+static u64 ba_dl_t;                           /* when the first download began */
+#endif
+
+/* Wi-Fi on and the network started (socInit only while it's needed, as
+ * gpSP 3D's update check), or false with a message in err */
+static bool net_start(char *err, int errlen)
+{
+   u32 st = 0;
+   Result r;
+   if (R_SUCCEEDED(acInit()))
+   {
+      if (R_FAILED(ACU_GetWifiStatus(&st)))
+         st = 0;
+      acExit();
+   }
+   if (!st)
+   {
+      snprintf(err, errlen, "The 3DS isn't on Wi-Fi. Connect it\nto the internet and try again.");
+      return false;
+   }
+   if (!(soc_buf = memalign(0x1000, SOC_SIZE)))
+   {
+      snprintf(err, errlen, "Not enough memory.");
+      return false;
+   }
+   if (R_FAILED(r = socInit(soc_buf, SOC_SIZE)))
+   {
+      snprintf(err, errlen, "The network didn't start (%08lX).", (unsigned long)r);
+      free(soc_buf);
+      soc_buf = NULL;
+      return false;
+   }
+   net_begin();
+   memset(ba_skip, 0, sizeof(ba_skip));
+   return true;
+}
+
+static void net_stop_all(void)
+{
+   net_end();
+   socExit();
+   free(soc_buf);
+   soc_buf = NULL;
+}
+
+static int ba_stop(void)
+{
+   hidScanInput();
+   return (hidKeysHeld() & KEY_B) != 0;
+}
+
+/* the progress screen, at most every 100 ms: the bar is the games done
+ * plus how far along this one's step is (step -1: just started) */
+static void ba_show(int step, size_t done, size_t total)
+{
+   static const char *const what[] = { "Getting the game list", "Reading the game", "Downloading" };
+   const char *w = step >= 0 ? what[step] : "Looking it up";
+   char title[64], line[320];
+   int pct = total ? (int)((u64)done * 100 / total) : 0;
+   u64 now = svcGetSystemTick();
+#ifdef ICONMAKER_TIMING
+   if (step == BOXART_STEP_DOWNLOAD && !ba_dl_t)
+      ba_dl_t = now;
+#endif
+   if (now - ba_drawn < SYSCLOCK_ARM11 / 10)
+      return;
+   ba_drawn = now;
+   if (ba_n > 1)
+   {
+      snprintf(title, sizeof(title), "Getting box art (%d of %d)...", ba_i + 1, ba_n);
+      snprintf(line, sizeof(line), "%s: %s", w, ba_name);
+   }
+   else
+   {
+      snprintf(title, sizeof(title), "Getting box art...");
+      if (total)
+         snprintf(line, sizeof(line), "%s... %d%%", w, pct);
+      else if (done)
+         snprintf(line, sizeof(line), "%s... %lu KB", w, (unsigned long)(done / 1024));
+      else
+         snprintf(line, sizeof(line), "%s...", w);
+   }
+   progress_keys(title, line, ba_i * 100 + pct, ba_n * 100, "Hold B to stop");
+}
+
+/* box art for the game e (in cwd): saved to boxart_dir or next to it;
+ * *from: the library it came from, or "" for libretro */
+static int get_boxart(const entry *e, char *found, int foundlen, const char **from, char *err, int errlen)
+{
+   boxart_source *src = ba_src[e->sys], use[BOXART_SOURCES + 1];
+   const char *dot = strrchr(e->name, '.'), *sys = e->sys == SYS_SNES ? "snes" : "gba";
+   char path[800], out[800];
+   int r, i, n = nboxart_src + 1, nuse = 0, map[BOXART_SOURCES + 1], which;
+#ifdef ICONMAKER_TIMING
+   u64 t0 = svcGetSystemTick(), t_list = 0, t_get;
+#endif
+   ba_name = e->name;
+   ba_drawn = 0;
+   ba_show(-1, 0, 0);
+   *from = "";
+   mkdir("sdmc:/3ds", 0777);
+   mkdir("sdmc:/3ds/gpsp3d", 0777);
+   for (i = 0; i < n; i++)
+   {
+      char list[80];
+      const char *base = i < nboxart_src ? boxart_src[i] : NULL;
+      if (ba_skip[e->sys][i])
+         continue;
+      if (ba_loaded[e->sys][i])
+      {
+         map[nuse] = i;
+         use[nuse++] = src[i];
+         continue;
+      }
+      src[i].base = base;
+      if (base)
+         snprintf(list, sizeof(list), BOXART_LIB_LIST,
+                  (unsigned long)crc32(0, (const Bytef*)base, strlen(base)), sys);
+      else
+         snprintf(list, sizeof(list), BOXART_LIST, sys);
+      r = boxart_list_load(&src[i].list, base, e->sys, list, err, errlen);
+      if (r == BOXART_STOPPED || (r && !base))
+         return r;
+      if (r)
+      {
+         /* a library that can't be reached now: tried again at the next L */
+         ba_skip[e->sys][i] = true;
+         continue;
+      }
+      ba_loaded[e->sys][i] = true;
+      map[nuse] = i;
+      use[nuse++] = src[i];
+   }
+#ifdef ICONMAKER_TIMING
+   t_list = svcGetSystemTick() - t0;
+#endif
+   snprintf(path, sizeof(path), "%s%s", cwd, e->name);
+   if (boxart_dir[0])
+   {
+      mkdir(boxart_dir, 0777);
+      snprintf(out, sizeof(out), "%s/%.*s.png", boxart_dir, (int)(dot - e->name), e->name);
+   }
+   else
+      snprintf(out, sizeof(out), "%s%.*s.png", cwd, (int)(dot - e->name), e->name);
+#ifdef ICONMAKER_TIMING
+   ba_dl_t = 0;
+   t_get = svcGetSystemTick();
+#endif
+   r = boxart_get(use, nuse, path, e->sys, out, BOXART_SIDE, found, foundlen, &which, err, errlen);
+   if (r == BOXART_SAVED && map[which] < nboxart_src)
+      *from = boxart_src[map[which]];
+#ifdef ICONMAKER_TIMING
+   {
+      /* finding the game (its name, or reading it for the CRC32) until the
+       * first download began; downloading (all names tried) and saving */
+      static const char *const res[] = { "saved", "none found", "error", "stopped" };
+      u64 end = svcGetSystemTick(), dl = ba_dl_t ? ba_dl_t : end;
+      char line[700];
+      snprintf(line, sizeof(line), "box art %s: %s%s%s%s%s, %.1f ms (game lists %.1f, finding the game %.1f, "
+               "downloading + saving %.1f)\n", e->name, res[r], r == BOXART_SAVED ? " as " : "",
+               r == BOXART_SAVED ? found : "", r == BOXART_SAVED ? " from " : "",
+               r == BOXART_SAVED ? (**from ? *from : "libretro") : "", tm_us(end - t0) / 1000.0,
+               tm_us(t_list) / 1000.0, tm_us(dl - t_get) / 1000.0, tm_us(end - dl) / 1000.0);
+      tm_log(line);
+   }
+#endif
+   return r;
+}
+
+static void boxart_one(const entry *e)
+{
+   char err[200], found[256], body[400];
+   const char *from;
+   int r;
+   if (e->pic[0] >= 0)
+   {
+      dialog("It has a picture", "Its own picture is used for the icon.\n"
+             "Delete or rename it to get box art.", "OK", NULL, C_ROW_SEL);
+      return;
+   }
+   if (!net_start(err, sizeof(err)))
+   {
+      dialog("Could not get box art", err, "OK", NULL, C_ROW_SEL);
+      return;
+   }
+   ba_i = 0;
+   ba_n = 1;
+   boxart_stop = ba_stop;
+   boxart_progress = ba_show;
+   r = get_boxart(e, found, sizeof(found), &from, err, sizeof(err));
+   boxart_stop = NULL;
+   boxart_progress = NULL;
+   net_stop_all();
+   if (r == BOXART_SAVED)
+   {
+      /* where from: a library's URL without https:// */
+      const char *f = strstr(from, "://") ? strstr(from, "://") + 3 : from;
+      snprintf(body, sizeof(body), "%.120s\nFrom %.100s.\nThe top screen shows it on the icon.", found,
+               *f ? f : "libretro-thumbnails");
+      dialog("Got the box art", body, "OK", NULL, UI_RGB(0x2E, 0x8B, 0x57));
+   }
+   else if (r == BOXART_NONE)
+      dialog("No box art found", nboxart_src ? "Neither your libraries nor libretro-\nthumbnails have a cover for it."
+             : "libretro-thumbnails has no cover for\nit. Games named as in No-Intro, like\n"
+             "Golf (USA).gba, are found best.", "OK", NULL, C_ROW_SEL);
+   else if (r == BOXART_ERROR)
+      dialog("Could not get box art", err, "OK", NULL, C_ROW_SEL);
+}
+
+static void boxart_folder(void)
+{
+   char err[200] = "", found[256], body[300];
+   const char *from;
+   int i, saved = 0, none = 0, r = BOXART_SAVED, want = 0;
+   for (i = 0; i < nentries; i++)
+      if (!entries[i].dir && entries[i].pic[0] < 0)
+         want++;
+   if (!want)
+   {
+      dialog(ngames ? "They all have pictures" : "No games here",
+             ngames ? "Every game here has its own picture." : "This folder has no GBA or SNES games.",
+             "OK", NULL, C_ROW_SEL);
+      return;
+   }
+   snprintf(body, sizeof(body), "For the %d game%s here without a picture,\nfrom libretro-thumbnails (needs Wi-Fi).",
+            want, want == 1 ? "" : "s");
+   if (!dialog("Get box art?", body, "Get box art", "Cancel", C_ACCENT))
+      return;
+   if (!net_start(err, sizeof(err)))
+   {
+      dialog("Could not get box art", err, "OK", NULL, C_ROW_SEL);
+      return;
+   }
+   ba_i = 0;
+   ba_n = want;
+   boxart_stop = ba_stop;
+   boxart_progress = ba_show;
+   for (i = 0; i < nentries && aptMainLoop(); i++)
+   {
+      if (entries[i].dir || entries[i].pic[0] >= 0)
+         continue;
+      r = get_boxart(&entries[i], found, sizeof(found), &from, err, sizeof(err));
+      if (r == BOXART_SAVED)
+         saved++;
+      else if (r == BOXART_NONE)
+         none++;
+      else
+         break;                        /* stopped, or the network or SD card failed */
+      ba_i++;
+   }
+   boxart_stop = NULL;
+   boxart_progress = NULL;
+   net_stop_all();
+   if (r == BOXART_ERROR)
+      snprintf(body, sizeof(body), "%d saved, %d not found. Then:\n%.100s", saved, none, err);
+   else
+      snprintf(body, sizeof(body), "%d saved, %d not found%s", saved, none,
+               r == BOXART_STOPPED ? ", then stopped." : ".");
+   dialog(r == BOXART_ERROR ? "Box art stopped" : "Done", body, "OK", NULL,
+          r == BOXART_ERROR ? C_ROW_SEL : UI_RGB(0x2E, 0x8B, 0x57));
+}
+
 static void delete_icon(const icon_entry *ic)
 {
    char body[200];
@@ -1585,12 +1927,16 @@ static void save_dir(void)
 static void save_settings(void)
 {
    FILE *f;
+   int i;
    mkdir("sdmc:/3ds", 0777);
    mkdir("sdmc:/3ds/gpsp3d", 0777);
    if ((f = fopen(SETTINGS, "w")))
    {
       fprintf(f, "banner=%s\n", style_key[banner_style]);
       fprintf(f, "fit=%s\n", fit_key[fit_mode]);
+      fprintf(f, "boxart_dir=%s\n", boxart_dir);
+      for (i = 0; i < nboxart_src; i++)
+         fprintf(f, "boxart_source=%s\n", boxart_src[i]);
       fclose(f);
    }
 }
@@ -1598,7 +1944,7 @@ static void save_settings(void)
 static void load_settings(void)
 {
    FILE *f = fopen(SETTINGS, "r");
-   char buf[128];
+   char buf[320];
    if (!f)
       return;
    while (fgets(buf, sizeof(buf), f))
@@ -1617,6 +1963,28 @@ static void load_settings(void)
          for (i = 0; i < FIT_COUNT; i++)
             if (!strcmp(buf + 4, fit_key[i]))
                fit_mode = i;
+      }
+      else if (!strncmp(buf, "boxart_dir=", 11))
+      {
+         size_t n;
+         buf[strcspn(buf, "\r\n")] = 0;
+         snprintf(boxart_dir, sizeof(boxart_dir), "%.255s", buf + 11);
+         n = strlen(boxart_dir);
+         while (n && boxart_dir[n - 1] == '/')     /* sdmc:/3ds/boxart/ -> sdmc:/3ds/boxart */
+            boxart_dir[--n] = 0;
+      }
+      else if (!strncmp(buf, "boxart_source=", 14) && nboxart_src < BOXART_SOURCES)
+      {
+         /* a library's URL, with the / at the end it needs */
+         char *u = boxart_src[nboxart_src];
+         size_t n;
+         buf[strcspn(buf, "\r\n")] = 0;
+         snprintf(u, sizeof(boxart_src[0]) - 1, "%.250s", buf + 14);
+         n = strlen(u);
+         if (n && u[n - 1] != '/')
+            strcpy(u + n, "/");
+         if (n)
+            nboxart_src++;
       }
    fclose(f);
 }
@@ -1916,6 +2284,7 @@ int main(void)
    png_shrink_clock = jpeg_shrink_clock = svcGetSystemTick;
 #endif
    load_dir();
+   read_boxart_dir();
    read_dir();
    top_wait = 1;
 
@@ -1983,6 +2352,19 @@ int main(void)
             fit_mode = (fit_mode + 1) % FIT_COUNT;
             cache_clear();
             save_settings();
+            top_wait = 1;
+            redraw = true;
+         }
+         else if (k & KEY_L)
+         {
+            /* box art: the game's, or on a folder every game's here */
+            if (nentries && !entries[sel].dir)
+               boxart_one(&entries[sel]);
+            else
+               boxart_folder();
+            read_boxart_dir();
+            read_dir();
+            cache_clear();
             top_wait = 1;
             redraw = true;
          }

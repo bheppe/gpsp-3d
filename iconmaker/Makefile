@@ -31,8 +31,12 @@ endif
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 # libjpeg (3ds-libjpeg-turbo) and libpng (3ds-libpng) read covers a piece at
-# a time, JPEGs decoded straight at the size needed
-LIBS     := -ljpeg -lpng16 -lz -lctru -lm
+# a time, JPEGs decoded straight at the size needed; libcurl (3ds-curl, with
+# mbedTLS) downloads box art: the 3DS's own HTTPS can't reach GitHub
+CURL_PC   := $(PORTLIBS)/bin/arm-none-eabi-pkg-config
+CURL_LIBS := $(if $(wildcard $(CURL_PC)),$(shell $(CURL_PC) --libs --static libcurl 2>/dev/null))
+CURL_LIBS := $(if $(strip $(CURL_LIBS)),$(filter-out -lctru -lm -lz,$(CURL_LIBS)),-lcurl -lmbedtls -lmbedx509 -lmbedcrypto)
+LIBS     := -ljpeg -lpng16 $(CURL_LIBS) -lz -lctru -lm
 LIBDIRS  := $(PORTLIBS) $(CTRULIB)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))

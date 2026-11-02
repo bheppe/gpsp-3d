@@ -28,8 +28,9 @@ Read it before changing anything; the README is for users, this is for you.
 | `gpsp3ds/make-forwarders.sh` | PC script: forwarder CIAs for a folder of games (ImageMagick optional) |
 | `iconmaker/source/fwdcia.c`, `banner.c` | patch a template CIA on the 3DS (title ID, SMDH, banner, romfs path, every hash) |
 | `iconmaker/source/pngshrink.c`, `jpegshrink.c` | covers decoded small while read (libpng / libjpeg) |
+| `iconmaker/source/boxart.c`, `netget.c` | box art download: libretro's No-Intro list, CRC32, libretro-thumbnails (libcurl) |
 | `iconmaker/tools/make_banner3d.py` | makes the 3D HOME Menu banners (needs pycgfx; run on a PC) |
-| `iconmaker/test/` | `fwdtest.c` + `verify.py` (forwarder CIA checked like the 3DS does), `pngtest.c`, `jpegtest.c` |
+| `iconmaker/test/` | `fwdtest.c` + `verify.py` (forwarder CIA checked like the 3DS does), `pngtest.c`, `jpegtest.c`, `boxarttest.c` |
 | `tests/gba-roms/` | core ROM tests (CI) |
 | `docker/` | the build image and `ci-build.sh` (what CI runs) |
 | `ROADMAP.md` | what's done, in testing, planned; update it with every change |
@@ -37,8 +38,8 @@ Read it before changing anything; the README is for users, this is for you.
 ## Building
 
 devkitARM (devkitPro) with `3ds-dev` plus these portlibs:
-`3ds-curl` (gpSP 3D's update check), `3ds-libjpeg-turbo` and `3ds-libpng`
-(Icon Maker). Also `bannertool` and `makerom` on the PATH.
+`3ds-curl` (gpSP 3D's update check, Icon Maker's box art), `3ds-libjpeg-turbo`
+and `3ds-libpng` (Icon Maker). Also `bannertool` and `makerom` on the PATH.
 
 ```
 bash gpsp3ds/build-gpsp3ds.sh      # -> gpsp3ds/out/gpsp3d.cia, gpsp3d.3dsx
