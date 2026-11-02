@@ -961,6 +961,21 @@ static void make_art(const char *path, const entry *e, game_art *a)
 
 /* Make and install the icon for the game at path. Returns 0, or -1 with a
  * message in err. */
+/* the CIA in memory -> installed */
+static Result install_cia_buf(const u8 *cia, u32 size)
+{
+   Handle h;
+   u32 written = 0;
+   Result r = AM_StartCiaInstall(MEDIATYPE_SD, &h);
+   if (R_FAILED(r))
+      return r;
+   r = FSFILE_Write(h, &written, 0, cia, size, 0);
+   if (R_SUCCEEDED(r) && written == size)
+      return AM_FinishCiaInstall(h);
+   AM_CancelCIAInstall(h);
+   return R_SUCCEEDED(r) ? -1 : r;
+}
+
 static int make_icon(const char *path, const entry *e, char *err, int errlen)
 {
    static game_art art;
@@ -971,9 +986,8 @@ static int make_icon(const char *path, const entry *e, char *err, int errlen)
    u8 *cia;
    bool three_d;
    const u8 *tpl;
-   u32 size, written;
+   u32 size;
    fwdcia_params p;
-   Handle h;
    Result r;
 
    make_art(path, e, &art);
@@ -1013,18 +1027,14 @@ static int make_icon(const char *path, const entry *e, char *err, int errlen)
       return -1;
    }
 
-   r = AM_StartCiaInstall(MEDIATYPE_SD, &h);
-   if (R_SUCCEEDED(r))
+   r = install_cia_buf(cia, size);
+   if (R_FAILED(r) && R_DESCRIPTION(r) == RD_ALREADY_EXISTS)
    {
-      r = FSFILE_Write(h, &written, 0, cia, size, 0);
-      if (R_SUCCEEDED(r) && written == size)
-         r = AM_FinishCiaInstall(h);
-      else
-      {
-         AM_CancelCIAInstall(h);
-         if (R_SUCCEEDED(r))
-            r = -1;
-      }
+      /* Made before, with the other template (3D <-> flat banner): the
+       * system won't put different contents over the same title and
+       * version. Remove the old icon, then install again. */
+      AM_DeleteTitle(MEDIATYPE_SD, p.title_id);
+      r = install_cia_buf(cia, size);
    }
    free(cia);
    if (R_FAILED(r))
