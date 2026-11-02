@@ -218,8 +218,15 @@ a game with one always uses it, also when the 3D banner is chosen).
 A picture of another shape, like most box art, is **padded** to fit by default;
 **X** on the Games tab switches to **cropping** it (scaled to fill, the edges
 cut off) and back. This applies to the icon, the 3D tile and the banner, and
-the choice is saved. Making a game again replaces its icon. More in
-[iconmaker/README.md](iconmaker/README.md).
+the choice is saved. Making a game again replaces its icon.
+
+No picture? **L** downloads the game's box art (with Wi-Fi) from
+[libretro-thumbnails](https://github.com/libretro-thumbnails/libretro-thumbnails),
+the covers RetroArch shows, and saves it next to the game as its picture.
+**L** on a folder does every game there without a picture. With
+`boxart_dir=` in `sdmc:/3ds/gpsp3d/iconmaker.cfg` the pictures go to that
+folder instead. For ROM hacks, add your own box art libraries with
+`boxart_source=` lines. More in [iconmaker/README.md](iconmaker/README.md).
 
 ### On a PC: make-forwarders.sh
 
@@ -337,6 +344,10 @@ speed and skipped frames from **System -> Bottom screen -> Performance**) or on 
   run on a PC, not part of the apps). The fixes that make such a model work on
   the real HOME Menu follow [ClouDS Music FA](https://github.com/Epic0522/ClouDS-Music-FA)'s
   and [ftb](https://github.com/fosterbarnes/ftb)'s banner converters.
+- Icon Maker's box art is downloaded, on the 3DS when you ask for it, from
+  [libretro-thumbnails](https://github.com/libretro-thumbnails/libretro-thumbnails);
+  games are found in [libretro-database](https://github.com/libretro/libretro-database)'s
+  No-Intro lists (CC BY-SA 4.0). Neither is part of the apps.
 
 Game Boy Advance and Nintendo 3DS are trademarks of Nintendo. This project is
 not affiliated with or endorsed by Nintendo.
