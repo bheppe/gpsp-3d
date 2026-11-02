@@ -23,8 +23,9 @@ make -C "$GP/forwarder" >/dev/null
 # the forwarder ignores romfs:/path.txt once Icon Maker fills in its slot
 printf '\n' > "$TMP/romfs/path.txt"
 # the banner picture is noise: it hardly compresses, so it leaves room for any
-# picture Icon Maker puts in its place (every icon gets its own banner)
-bannertool makebanner -i res/template-banner.png -a "$GP/res/silent.wav" -o "$TMP/default.bnr" >/dev/null
+# picture Icon Maker puts in its place (every icon gets its own banner);
+# the same soft chime as the 3D banner (it was silent before 0.1.7)
+bannertool makebanner -i res/template-banner.png -a res/jingle.wav -o "$TMP/default.bnr" >/dev/null
 bannertool makesmdh -s "gpSP 3D game" -l "gpSP 3D game" -p "gpSP 3D" \
   -f visible,allow3d,recordusage,extendedbanner \
   -i "$GP/res/icon.png" -o "$TMP/icon.icn" >/dev/null
