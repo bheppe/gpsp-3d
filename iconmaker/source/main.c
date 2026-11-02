@@ -31,8 +31,7 @@
 #include "deficon.h"
 #include "ui.h"
 #include "pngshrink.h"
-
-#include <turbojpeg.h>
+#include "jpegshrink.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -72,11 +71,13 @@ static int fit_mode = FIT_PAD;
 typedef struct { char name[256]; bool dir, has_icon; int sys; s8 pic[2]; } entry;
 static const char *const pic_types[] = { "png", "jpg", "jpeg" };
 /* Pictures too big to use (an icon from the name instead, and a note): a
- * side over PIC_MAX_SIDE, a file over PIC_MAX_FILE (JPEGs are read whole),
- * or, where a picture must be decoded all at once (interlaced PNGs, JPEGs
- * libjpeg-turbo can't read), over PIC_MAX_FULL bytes decoded */
+ * side over PIC_MAX_SIDE; a progressive JPEG whose coefficients would take
+ * over PIC_MAX_COEF bytes; or, where a picture must be read and decoded
+ * all at once (interlaced PNGs, JPEGs libjpeg can't read), a file over
+ * PIC_MAX_FILE or over PIC_MAX_FULL bytes decoded */
 #define PIC_MAX_SIDE  4096
-#define PIC_MAX_FILE  (32 << 20)
+#define PIC_MAX_COEF  (16 << 20)
+#define PIC_MAX_FILE  (16 << 20)
 #define PIC_MAX_FULL  (8 << 20)
 typedef struct { u64 tid; char name[64]; u16 icon24[24 * 24]; int sys; } icon_entry;
 
@@ -553,57 +554,13 @@ static const u8 *template_smdh(const u8 *cia, u32 size)
    return NULL;
 }
 
-/* A JPEG at the smallest size libjpeg-turbo decodes it to (1/8, 1/4, ...)
- * that is still at least min_w x min_h, as RGBA; NULL if it can't read it.
- * Much faster than decoding all of a big cover and scaling it down after. */
-static u8 *jpeg_load(const u8 *buf, size_t size, int min_w, int min_h, int *w, int *h, bool *too_big)
-{
-   static tjhandle tj;
-   tjscalingfactor *sf, best = { 1, 1 };
-   int nsf, i, jw, jh;
-   u8 *img;
-   if (!tj && !(tj = tj3Init(TJINIT_DECOMPRESS)))
-      return NULL;
-   if (tj3DecompressHeader(tj, buf, size))
-      return NULL;
-   jw = tj3Get(tj, TJPARAM_JPEGWIDTH);
-   jh = tj3Get(tj, TJPARAM_JPEGHEIGHT);
-   if (jw <= 0 || jh <= 0)
-      return NULL;
-   if (jw > PIC_MAX_SIDE || jh > PIC_MAX_SIDE)
-   {
-      *w = jw;
-      *h = jh;
-      *too_big = true;
-      return NULL;
-   }
-   sf = tj3GetScalingFactors(&nsf);
-   for (i = 0; sf && i < nsf; i++)
-      if (sf[i].num <= sf[i].denom && TJSCALED(jw, sf[i]) >= min_w && TJSCALED(jh, sf[i]) >= min_h &&
-          sf[i].num * best.denom < best.num * sf[i].denom)
-         best = sf[i];
-   if (tj3SetScalingFactor(tj, best))
-      return NULL;
-   *w = TJSCALED(jw, best);
-   *h = TJSCALED(jh, best);
-   if (!(img = malloc((size_t)*w * *h * 4)))
-      return NULL;
-   /* a warning (a damaged end, say) still gives a picture */
-   if (tj3Decompress8(tj, buf, size, img, 0, TJPF_RGBA) && tj3GetErrorCode(tj) == TJERR_FATAL)
-   {
-      free(img);
-      return NULL;
-   }
-   return img;
-}
-
 /* The game's picture with this ending ("" or ".banner") and type (an index
  * into pic_types, -1: none), as RGBA, or NULL. It comes at least
  * min_w x min_h (or its own size if smaller), but often not much bigger:
- * PNGs are shrunk while read (pngshrink.c), JPEGs decoded small by
- * libjpeg-turbo; stb_image decodes all of the rest (interlaced PNGs, JPEGs
- * libjpeg-turbo can't read) if that fits in PIC_MAX_FULL. NULL with
- * *too_big if the picture is too big for that, *w x *h its size (if known). */
+ * PNGs are shrunk while read (pngshrink.c), JPEGs decoded small while read
+ * (jpegshrink.c); stb_image decodes all of the rest (interlaced PNGs, JPEGs
+ * libjpeg can't read) if that fits. NULL with *too_big if the picture is
+ * too big, *w x *h its size (if known). */
 static u8 *load_picture(const char *game, const char *ext, int type, int min_w, int min_h,
                         int *w, int *h, bool *too_big)
 {
@@ -612,7 +569,8 @@ static u8 *load_picture(const char *game, const char *ext, int type, int min_w, 
    bool banner = ext[0] != 0;
    u8 sig[8], *buf = NULL, *img = NULL;
    long size;
-   int n, interlaced = 0;
+   int n, interlaced = 0, why = 0;
+   size_t got;
    u32 mem = 0;
    FILE *f;
    *too_big = false;
@@ -627,7 +585,8 @@ static u8 *load_picture(const char *game, const char *ext, int type, int min_w, 
    size = ftell(f);
    fseek(f, 0, SEEK_SET);
    /* by what's in it, not the name: a .jpg can be a PNG */
-   if (fread(sig, 1, 8, f) == 8 && !memcmp(sig, "\x89PNG\r\n\x1a\n", 8))
+   got = fread(sig, 1, 8, f);
+   if (got == 8 && !memcmp(sig, "\x89PNG\r\n\x1a\n", 8))
    {
       fseek(f, 0, SEEK_SET);
       img = png_shrink(f, min_w, min_h, PIC_MAX_SIDE, w, h, &interlaced, &mem);
@@ -648,6 +607,29 @@ static u8 *load_picture(const char *game, const char *ext, int type, int min_w, 
          return NULL;
       }
    }
+   else if (got >= 3 && sig[0] == 0xFF && sig[1] == 0xD8 && sig[2] == 0xFF)
+   {
+#ifdef ICONMAKER_TIMING
+      u64 t_jpeg = svcGetSystemTick(), spun = spinner_ticks;
+#endif
+      fseek(f, 0, SEEK_SET);
+      img = jpeg_shrink(f, min_w, min_h, PIC_MAX_SIDE, PIC_MAX_COEF, w, h, &why, &mem);
+      tm_mark(banner ? "banner: read + decode JPEG (libjpeg)" : "icon: read + decode JPEG (libjpeg)");
+#ifdef ICONMAKER_TIMING
+      /* in that: the SD card, libjpeg decoding (and the spinner) */
+      tm_note("  of it: reading the SD card", jpeg_shrink_read_ticks);
+      tm_note("  of it: libjpeg decoding", svcGetSystemTick() - t_jpeg - jpeg_shrink_read_ticks -
+                                           (spinner_ticks - spun));
+      if (spinner_ticks != spun)
+         tm_note("  of it: drawing the spinner", spinner_ticks - spun);
+#endif
+      if (why)                         /* too big, or a button stopped it */
+      {
+         *too_big = why == JPEG_SHRINK_TOO_BIG;
+         fclose(f);
+         return NULL;
+      }
+   }
    if (!img)
    {
       buf = size > 0 && size <= PIC_MAX_FILE ? malloc(size) : NULL;
@@ -661,12 +643,7 @@ static u8 *load_picture(const char *game, const char *ext, int type, int min_w, 
       tm_mark(banner ? "banner: read the file" : "icon: read the file");
    }
    fclose(f);
-   if (buf && size > 2 && buf[0] == 0xFF && buf[1] == 0xD8)
-   {
-      img = jpeg_load(buf, size, min_w, min_h, w, h, too_big);
-      tm_mark(banner ? "banner: decode (libjpeg-turbo)" : "icon: decode (libjpeg-turbo)");
-   }
-   if (buf && !img && !*too_big)
+   if (buf && !*too_big)
    {
       /* all of it at once: only if that fits */
       int iw, ih;
@@ -1730,9 +1707,10 @@ static void cache_drop(const game_art *a)
          cache[i].path[0] = 0;
 }
 
-/* A button pressed while a preview is made stops it (a huge PNG can take
- * seconds); the main loop still gets the button. Called every 16 rows of a
- * PNG, which also turns the spinner once the preview takes a while. */
+/* A button pressed while a preview is made stops it (a huge cover can take
+ * seconds); the main loop still gets the button. Called every few rows of a
+ * PNG or JPEG being read, which also turns the spinner once the preview
+ * takes a while. */
 static u32 preview_keys;
 static bool preview_stopped;
 
@@ -1895,9 +1873,9 @@ static bool draw_top_for(int tab, int sel, bool am)
          preview_stopped = false;
          preview_t0 = svcGetSystemTick();
          spinner_last = spinner_ticks = 0;
-         png_shrink_stop = preview_stop;
+         png_shrink_stop = jpeg_shrink_stop = preview_stop;
          make_art(path, &entries[sel], a);
-         png_shrink_stop = NULL;
+         png_shrink_stop = jpeg_shrink_stop = NULL;
          if (preview_stopped)
          {
             cache_drop(a);
@@ -1935,7 +1913,7 @@ int main(void)
    load_settings();
 #ifdef ICONMAKER_TIMING
    tm_log_start();
-   png_shrink_clock = svcGetSystemTick;
+   png_shrink_clock = jpeg_shrink_clock = svcGetSystemTick;
 #endif
    load_dir();
    read_dir();
