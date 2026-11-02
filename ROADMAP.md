@@ -1,7 +1,7 @@
 # gpSP 3D roadmap
 
 What's been reported, what's done, and what's next. Reports come from
-[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.7 (updated Nov 1).
+[Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.6 (updated Nov 1).
 
 **Status key:** ✅ done · 🧪 done, needs testing on real hardware · 🔧 next up · 📋 planned · 💤 later / big project
 
@@ -90,7 +90,7 @@ What's been reported, what's done, and what's next. Reports come from
 | Donkey Kong Country 2: thin white outline behind characters against the sky | margret (Discord) | 📋 needs investigating |
 | Tiny Toon Adventures: Buster Busts Loose in the Recommended list (as Auto) | SWChris (Discord) | 📋 needs its CRC32 |
 
-**v0.1.7: Icon Maker fixes** (gpSP 3D unchanged)
+**v0.1.6, updated Nov 1: Icon Maker 0.1.7 fixes** (gpSP 3D unchanged)
 
 | Change | Asked by | Status |
 |---|---|---|
@@ -100,7 +100,7 @@ What's been reported, what's done, and what's next. Reports come from
 | **Remaking an icon with the other banner type** failed (C8E083FC): the old icon is now replaced | Surge And Finn (Discord) | ✅ |
 | Custom banner sounds (`Game.banner.wav`) in Icon Maker | Surge And Finn (Discord) | 📋 next |
 
-**gpSP 3D v0.1.8: performance**
+**gpSP 3D v0.1.7: performance**
 
 | Plan | Status |
 |---|---|
@@ -131,7 +131,7 @@ What's been reported, what's done, and what's next. Reports come from
 
 | # | Problem or request | Reported by | Status |
 |---|---|---|---|
-| 6 | **New 3DS: use the extra CPU cores** for drawing instead of sharing core 2 with the system | — | 📋 v0.1.8 |
+| 6 | **New 3DS: use the extra CPU cores** for drawing instead of sharing core 2 with the system | — | 📋 v0.1.7 |
 | 7 | Need for Speed Underground: ~4 fps on the title screen, then freezes | myownfriend (#2) | 🔧 needs the game to reproduce |
 | 8 | Stutter in Mario Golf: Advance Tour, Super Mario Galaxy (GBA port), NFS Underground; WarioWare: Twisted a little choppy on Old 3DS (smooth on New 3DS) | Discord, After-Pop-2000 (Reddit) | 🔧 Mario Golf: much better in v0.1.3 (RAM code rewrites cost about half), still slows down on the course view and the swing on Old 3DS. Galaxy port: 55% -> about 76% speed on Old 3DS; the rest needs a bigger dynarec change (register allocation), on hold. Pokémon GS Chronicles: fine |
 | 9 | Classic NES Series: Castlevania doesn't boot | Male_Inkling | 📋 |
