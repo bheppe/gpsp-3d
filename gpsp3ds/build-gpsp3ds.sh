@@ -39,7 +39,8 @@ make -f gpsp3d.mk CORE="$CORE" -j$JOBS
 
 echo "=== 3/3 CIA ==="
 mkdir -p build
-# the 3D banner (made by ../iconmaker/tools/make-app-banners.sh)
+# the 3D banner (made by Icon Maker's tools/make_banner3d.py,
+# https://github.com/bheppe/iconmaker-3ds)
 cp res/banner3d.bnr build/gpsp3d.bnr
 bannertool makesmdh -s "gpSP 3D" -l "gpSP 3D - standalone GBA for 3DS" -p "gpSP team, bheppe" \
   -f visible,allow3d,recordusage,extendedbanner \

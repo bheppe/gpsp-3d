@@ -3,6 +3,10 @@
 What's been reported, what's done, and what's next. Reports come from
 [Issues](../../issues), the Reddit thread and Discord. Status as of v0.1.7 (updated Nov 8).
 
+Icon Maker has its own repo and roadmap since v0.1.7:
+[bheppe/iconmaker-3ds](https://github.com/bheppe/iconmaker-3ds/blob/main/ROADMAP.md).
+Its rows below are the releases it shipped in here.
+
 **Status key:** ✅ done · 🧪 done, needs testing on real hardware · 🔧 next up · 📋 planned · 💤 later / big project
 
 ## Released
@@ -98,12 +102,12 @@ What's been reported, what's done, and what's next. Reports come from
 | **Custom banners back**: a game's own `.banner` picture always wins, also with 3D chosen | Surge And Finn (Discord) | ✅ |
 | **Chime on flat banners** too (they were silent) | Surge And Finn (Discord) | ✅ |
 | **Remaking an icon with the other banner type** failed (C8E083FC): the old icon is now replaced | Surge And Finn (Discord) | ✅ |
-| Custom banner sounds (`Game.banner.wav`) in Icon Maker | Surge And Finn (Discord) | 📋 next |
 
 **gpSP 3D v0.1.8: performance**
 
 | Plan | Status |
 |---|---|
+| **Icon Maker moved to its own repo**, [bheppe/iconmaker-3ds](https://github.com/bheppe/iconmaker-3ds), with its history, versions and releases; the store lists it from there (bheppe, michvllni) | 🧪 |
 | **New 3DS: drawing on its own CPU core** instead of sharing core 2 with the system | 📋 |
 | **Dynarec register allocation**: Mario Golf, the Super Mario Galaxy port, Golden Sun and WarioWare: Twisted on Old 3DS (#8, #10) | 📋 |
 
@@ -115,7 +119,6 @@ What's been reported, what's done, and what's next. Reports come from
 | Ready-to-show copies of the thumbnails (saved at 128 px on the shorter side), so making a whole folder stays fast | 🧪 |
 | **Box art folder**: `boxart_dir=` in `iconmaker.cfg` (next to the game by default) | ✅ michvllni (GitHub) |
 | **Your own box art libraries** (ROM hacks, translations): `boxart_source=` lines in `iconmaker.cfg`, laid out like libretro-thumbnails with a `list.txt` of CRC32s; tried before libretro | ✅ michvllni (GitHub) |
-| Community art repo for original icons and banners (no copies of official box art) | 📋 |
 
 **Later**
 
@@ -123,7 +126,6 @@ What's been reported, what's done, and what's next. Reports come from
 |---|---|
 | Tilt the layers with the 3DS (parallax from the gyroscope) | 💤 |
 | Snes9x 3D: separate depths for high- and low-priority tiles of a layer (Earthworm Jim 2's flipped BG3) | 💤 SWChris (Discord) |
-| DS game forwarders in Icon Maker (nds-bootstrap) | 💤 |
 | Game library with RomM sync | 💤 Gaming4LifeDE |
 | **Genesis 3D** | 💤 next big project |
 | Screenshots and 3D GIFs in the READMEs | 📋 |

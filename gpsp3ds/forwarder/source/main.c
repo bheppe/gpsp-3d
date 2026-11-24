@@ -6,9 +6,10 @@
  * that path to sdmc:/3ds/gpsp3d/launch.txt and jumps to the installed
  * gpSP 3D CIA, which plays the game and closes when you quit.
  *
- * The icon maker (made on the 3DS itself) instead fills in the slot below
- * in a copy of this program: the game, the emulator to start and the file
- * that emulator reads the game's path from. Its layout must stay as it is.
+ * Icon Maker (https://github.com/bheppe/iconmaker-3ds, on the 3DS itself)
+ * instead fills in the slot below in its own copy of this program: the game,
+ * the emulator to start and the file that emulator reads the game's path
+ * from. Its layout must stay as it is: installed forwarders keep it.
  */
 #include <3ds.h>
 #include <stdio.h>
