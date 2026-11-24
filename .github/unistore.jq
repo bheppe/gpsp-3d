@@ -1,7 +1,7 @@
 # Universal-Updater feed (UniStore v3) from the GitHub release lists of
-# gpSP 3D (with Icon Maker) and Snes9x 3D.
+# gpSP 3D, Icon Maker and Snes9x 3D.
 #
-# Input: {gpsp: [releases], snes9x: [releases]}, each release
+# Input: {gpsp: [releases], iconmaker: [releases], snes9x: [releases]}, each release
 #        {tag_name, draft, prerelease, published_at, body,
 #         assets: [{name, size, browser_download_url}]}.
 # Arg:   $base — site URL, no trailing slash.
@@ -55,7 +55,7 @@ def app($rels; $m):
         # QR codes that release.yml appends are no use on the console.
         releasenotes: (($latest.body // "")
           | gsub("\r"; "")
-          | sub("\\s*<!-- gpsp3d-qr:start -->[\\s\\S]*$"; "")),
+          | sub("\\s*<!-- (gpsp3d|iconmaker)-qr:start -->[\\s\\S]*$"; "")),
         # The CIA's unique ID: marks the app as installed
         title_ids: [$m.title_id],
         installed_files: ["%3DSX%/\($m.tdsx)"]
@@ -74,14 +74,15 @@ def app($rels; $m):
       # UNIQUE_ID 0xBAC81 from gpsp3ds/build-gpsp3ds.sh
       title_id: 765057,
       cia: "gpsp3d.cia", tdsx: "gpsp3d.3dsx" }),
-    app($in.gpsp; {
+    app($in.iconmaker; {
       title: "Icon Maker", author: "bheppe",
       description: "HOME Menu icons for GBA and SNES games",
       category: "utility", license: "gpl-2.0", icon_index: 1,
-      # UNIQUE_ID 0xF3D01 from iconmaker/build-iconmaker.sh
+      # UNIQUE_ID 0xF3D01 from build-iconmaker.sh in bheppe/iconmaker-3ds
       title_id: 998657,
       cia: "iconmaker.cia", tdsx: "iconmaker.3dsx" }),
-    # Snes9x 3D also attaches Icon Maker; it is listed once, from gpSP 3D.
+    # Icon Maker is listed from its own repo only (gpSP 3D releases up to
+    # v0.1.7 and some Snes9x 3D releases attach a copy too).
     app($in.snes9x; {
       title: "Snes9x 3D", author: "bheppe, matbo87, bubble2k16",
       description: "SNES games in stereoscopic 3D",

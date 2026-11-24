@@ -8,7 +8,7 @@ tags
 cscope.out
 pandora/linux
 tools/generate_cc_lut
-# test builds and logs (gpSP 3D, Icon Maker)
+# test builds and logs
 *.log
 *.cia
 *.3dsx

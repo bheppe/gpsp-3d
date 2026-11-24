@@ -2,7 +2,7 @@ name: Pages
 
 # Builds the GitHub Pages site from docs/ plus a Universal-Updater store
 # (UniStore v3) for gpSP 3D, Icon Maker and Snes9x 3D, generated from ALL
-# published releases of this repo and bheppe/snes9x_3ds. Nothing generated is
+# published releases of this repo, bheppe/iconmaker-3ds and bheppe/snes9x_3ds. Nothing generated is
 # committed. The store's content is a pure function of the release lists
 # (.github/unistore.jq); only its revision is carried over from the deployed
 # store, and it moves only when the content does.
@@ -16,13 +16,12 @@ on:
     paths:
       - docs/**
       - gpsp3ds/res/icon.png
-      - iconmaker/res/icon.png
       - .github/unistore.jq
       - .github/workflows/pages.yml
   release:
     # Every change to the list, also releases uploaded by hand without Release
     types: [published, edited, deleted, unpublished]
-  # Snes9x 3D releases happen in another repo and can't start this workflow.
+  # Icon Maker and Snes9x 3D releases happen in other repos and can't start this workflow.
   # A run with no new release changes nothing: the revision stays the same.
   schedule:
     - cron: '17 */6 * * *'
@@ -36,6 +35,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  ICONMAKER_REPO: bheppe/iconmaker-3ds
   SNES9X_REPO: bheppe/snes9x_3ds
 
 jobs:
@@ -95,9 +95,11 @@ jobs:
                                assets: [ .assets[] | {name, size, browser_download_url} ] } ]'
           }
           fetch "${{ github.repository }}" > gpsp.json
+          fetch "$ICONMAKER_REPO" > iconmaker.json
           fetch "$SNES9X_REPO" > snes9x.json
-          jq -n --slurpfile g gpsp.json --slurpfile s snes9x.json '{gpsp: $g[0], snes9x: $s[0]}' > releases.json
-          echo "Releases: $(jq '.gpsp | length' releases.json) gpSP 3D, $(jq '.snes9x | length' releases.json) Snes9x 3D"
+          jq -n --slurpfile g gpsp.json --slurpfile i iconmaker.json --slurpfile s snes9x.json \
+            '{gpsp: $g[0], iconmaker: $i[0], snes9x: $s[0]}' > releases.json
+          echo "Releases: $(jq '.gpsp | length' releases.json) gpSP 3D, $(jq '.iconmaker | length' releases.json) Icon Maker, $(jq '.snes9x | length' releases.json) Snes9x 3D"
 
       - name: Fetch deployed store
         run: |
@@ -142,13 +144,20 @@ jobs:
             done
 
       # One icon per app, in the order of icon_index in .github/unistore.jq.
-      # Snes9x 3D's comes from its newest listed release.
+      # Icon Maker's and Snes9x 3D's come from their newest listed release.
       - name: Build icon sheet
         run: |
-          tag="$(jq -r '.storeContent[] | select(.info.title == "Snes9x 3D") | .info.version' _site/unistore/gpsp3d.unistore)"
+          version() { jq -r --arg t "$1" '.storeContent[] | select(.info.title == $t) | .info.version' _site/unistore/gpsp3d.unistore; }
           mkdir -p icons
           cp gpsp3ds/res/icon.png icons/0-gpsp3d.png
-          cp iconmaker/res/icon.png icons/1-iconmaker.png
+          tag="$(version "Icon Maker")"
+          if [ -n "$tag" ]; then
+            curl -fsSL -o icons/1-iconmaker.png "https://raw.githubusercontent.com/$ICONMAKER_REPO/$tag/res/icon.png"
+          else
+            # Not listed: keep the index taken, so the others don't move
+            cp icons/0-gpsp3d.png icons/1-iconmaker.png
+          fi
+          tag="$(version "Snes9x 3D")"
           if [ -n "$tag" ]; then
             curl -fsSL -o icons/2-snes9x.png "https://raw.githubusercontent.com/$SNES9X_REPO/$tag/resources/icon.png"
           else

@@ -56,7 +56,7 @@ raise the 3D slider. No RetroArch needed.
   version is out and says so at the bottom of the game list
   (System -> Check for updates turns it off).
 - **HOME Menu icons per game** (forwarders), made right on the 3DS with
-  **Icon Maker** (GBA and SNES games), or on a PC. Their banner is 3D: the
+  [Icon Maker](https://github.com/bheppe/iconmaker-3ds) (GBA and SNES games), or on a PC. Their banner is 3D: the
   game's icon on a turning tile that comes out of the screen, its name under
   it, and a soft chime. See below.
 - **Game guides on the bottom screen** while you play (a `.txt` next to the
@@ -99,9 +99,9 @@ need to go back.
 
 ### FBI
 
-Every [release](../../releases) has QR codes for `gpsp3d.cia` and
-`iconmaker.cia` in its notes. In FBI, choose **Remote Install** ->
-**Scan QR Code** and scan one.
+Every [release](../../releases) has a QR code for `gpsp3d.cia` in its notes.
+In FBI, choose **Remote Install** -> **Scan QR Code** and scan it. Icon
+Maker's QR codes are in [its releases](https://github.com/bheppe/iconmaker-3ds/releases).
 
 ### By hand
 
@@ -191,42 +191,17 @@ into it (a "forwarder"). gpSP 3D must be installed as a CIA.
 
 ### On the 3DS: Icon Maker
 
-Icon Maker does GBA games (opened in gpSP 3D) and SNES games (`.sfc`, `.smc`,
-`.fig`, `.swc`, opened in [Snes9x 3D](https://github.com/bheppe/snes9x_3ds)
-v1.61-layers6 or newer, installed as a CIA). SNES games get a grey Super
-Nintendo cartridge icon.
+[Icon Maker](https://github.com/bheppe/iconmaker-3ds) makes them right on the
+3DS, for GBA games (opened in gpSP 3D) and SNES games (opened in
+[Snes9x 3D](https://github.com/bheppe/snes9x_3ds)). It's in the
+[store](#universal-updater-recommended), or install `iconmaker.cia` from
+[its releases](https://github.com/bheppe/iconmaker-3ds/releases) with FBI.
+Open it, go to your games and press **A** on one, twice. The banner is 3D by
+default, with a soft chime; your own pictures, box art downloads and more are
+in [Icon Maker's README](https://github.com/bheppe/iconmaker-3ds#readme).
 
-1. Install **Icon Maker** from the [store](#universal-updater-recommended),
-   or `iconmaker.cia` from the [Releases](../../releases) page with FBI
-   (or run `iconmaker.3dsx` from the Homebrew Launcher).
-2. Open **Icon Maker**, go to your games and press **A** on one. The top screen
-   shows the icon and banner it will get; press **A** again to put it on the
-   HOME Menu. **Y** does every game in the folder at once.
-3. **My icons** (R, or tap the tab) lists the icons you've made; **X** deletes
-   one (the game file stays).
-
-The banner is 3D by default: the game's icon on a rounded tile that turns and
-bobs in front of the HOME Menu's theme, the game's name under it, and a soft
-chime. **SELECT** on the Games tab switches to a flat banner (gpSP 3D's blue, or
-no background) and back; the bottom screen shows which is on.
-
-Without any pictures, a game gets a cartridge icon with its name on the label.
-To use your own, put them next to the game: `Pokemon Emerald.png` (or `.jpg`)
-for the icon (any size; it's also what goes on the 3D tile) and
-`Pokemon Emerald.banner.png` (or `.jpg`) for your own banner (best 256x128;
-a game with one always uses it, also when the 3D banner is chosen).
-A picture of another shape, like most box art, is **padded** to fit by default;
-**X** on the Games tab switches to **cropping** it (scaled to fill, the edges
-cut off) and back. This applies to the icon, the 3D tile and the banner, and
-the choice is saved. Making a game again replaces its icon.
-
-No picture? **L** downloads the game's box art (with Wi-Fi) from
-[libretro-thumbnails](https://github.com/libretro-thumbnails/libretro-thumbnails),
-the covers RetroArch shows, and saves it next to the game as its picture.
-**L** on a folder does every game there without a picture. With
-`boxart_dir=` in `sdmc:/3ds/gpsp3d/iconmaker.cfg` the pictures go to that
-folder instead. For ROM hacks, add your own box art libraries with
-`boxart_source=` lines. More in [iconmaker/README.md](iconmaker/README.md).
+Icon Maker was part of this repo up to v0.1.7 (Icon Maker 0.2.0) and has its
+own repo since then.
 
 ### On a PC: make-forwarders.sh
 
@@ -262,9 +237,9 @@ start `gpsp3d.3dsx` with the game's path as its argument also work.
 ## Building
 
 You need [devkitPro](https://devkitpro.org/wiki/Getting_Started) with the 3DS
-packages (`3ds-dev`, which includes libctru, citro3d and picasso) and, for Icon
-Maker, `3ds-libjpeg-turbo` and `3ds-libpng` (`dkp-pacman -S 3ds-libjpeg-turbo
-3ds-libpng`), plus `makerom` and `bannertool` in your PATH.
+packages (`3ds-dev`, which includes libctru, citro3d and picasso) and
+`3ds-curl` (`dkp-pacman -S 3ds-curl`), plus `makerom` and `bannertool` in
+your PATH.
 
 ```
 git clone https://github.com/bheppe/gpsp-3d
@@ -274,13 +249,10 @@ bash gpsp-3d/gpsp3ds/build-gpsp3ds.sh
 The script builds the gpSP core (`make platform=ctr`), then the app, then the
 CIA. Results go to `gpsp3ds/out/` (`gpsp3d.cia`, `gpsp3d.3dsx`).
 
-Icon Maker: `bash gpsp-3d/iconmaker/build-iconmaker.sh` (results in
-`iconmaker/out/`).
-
 ### Building in a devcontainer
 
 The repo has a devcontainer with everything above already installed (devkitARM
-with `3ds-dev`, `3ds-libjpeg-turbo` and `3ds-libpng`, plus `makerom` and
+with `3ds-dev` and `3ds-curl`, plus `makerom` and
 `bannertool` at pinned versions). Open the repo in VS Code with the Dev
 Containers extension (Docker or Podman) and choose
 **Reopen in Container**, or start a GitHub Codespace. The first start builds
@@ -288,14 +260,12 @@ the image, which takes a few minutes. Then, in the container's terminal:
 
 ```
 bash gpsp3ds/build-gpsp3ds.sh
-bash iconmaker/build-iconmaker.sh
 ```
 
 The image is defined in `docker/gpsp3d-devcontainer.Dockerfile`; CI uses the
 published copy tagged with a hash of that file (`bash docker/build-image.sh`).
-`bash docker/ci-build.sh` builds both apps and checks a forwarder made by Icon
-Maker, the same test build GitHub Actions runs for every pull request and every
-push to `main`.
+`bash docker/ci-build.sh` is the same test build GitHub Actions runs for every
+pull request and every push to `main`.
 
 The `nightly` tag moves with every push to `main`, so `git pull` may stop with
 `would clobber existing tag`; `git fetch --tags --force` fixes it.
@@ -339,15 +309,14 @@ speed and skipped frames from **System -> Bottom screen -> Performance**) or on 
   file, the 3DS app binary as a whole is distributed under GPL-3.0.
 - UI font: [Inter](https://rsms.me/inter/) by Rasmus Andersson, SIL Open Font
   License 1.1 (`gpsp3ds/res/Inter-LICENSE.txt`).
-- The 3D banner model is made by `iconmaker/tools/make_banner3d.py` with
-  [pycgfx](https://github.com/skyfloogle/pycgfx) by skyfloogle (glTF to CGFX;
-  run on a PC, not part of the apps). The fixes that make such a model work on
-  the real HOME Menu follow [ClouDS Music FA](https://github.com/Epic0522/ClouDS-Music-FA)'s
+- The 3D banner (`gpsp3ds/res/banner3d.bnr`) is made by Icon Maker's
+  [`tools/make_banner3d.py`](https://github.com/bheppe/iconmaker-3ds/blob/main/tools/make_banner3d.py)
+  with [pycgfx](https://github.com/skyfloogle/pycgfx) by skyfloogle (glTF to
+  CGFX; run on a PC, not part of the app). The fixes that make such a model
+  work on the real HOME Menu follow [ClouDS Music FA](https://github.com/Epic0522/ClouDS-Music-FA)'s
   and [ftb](https://github.com/fosterbarnes/ftb)'s banner converters.
-- Icon Maker's box art is downloaded, on the 3DS when you ask for it, from
-  [libretro-thumbnails](https://github.com/libretro-thumbnails/libretro-thumbnails);
-  games are found in [libretro-database](https://github.com/libretro/libretro-database)'s
-  No-Intro lists (CC BY-SA 4.0). Neither is part of the apps.
+- `gpsp3ds/source/stb_image.h`: [stb](https://github.com/nothings/stb) by
+  Sean Barrett, MIT or public domain.
 
 Game Boy Advance and Nintendo 3DS are trademarks of Nintendo. This project is
 not affiliated with or endorsed by Nintendo.

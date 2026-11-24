@@ -64,23 +64,22 @@ jobs:
             bash docker/ci-build.sh
           sudo chown -R "$USER" .
 
-      # Same names as before (gpsp3d.cia, ...), so releases/latest/download links keep working
+      # Same names as before (gpsp3d.cia, ...), so releases/latest/download links keep working.
+      # Icon Maker is released from its own repo (bheppe/iconmaker-3ds).
       - name: Upload release assets
         run: |
           gh release upload "$TAG" --clobber \
-            gpsp3ds/out/gpsp3d.cia gpsp3ds/out/gpsp3d.3dsx \
-            iconmaker/out/iconmaker.cia iconmaker/out/iconmaker.3dsx
+            gpsp3ds/out/gpsp3d.cia gpsp3ds/out/gpsp3d.3dsx
 
-      - name: FBI install QR codes
+      - name: FBI install QR code
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends qrencode
           # FBI's "Scan QR Code" remote install expects the plain URL of the .cia
           qrencode -o gpsp3d-QR.png -s 8 -m 3 -l M "$DL/gpsp3d.cia"
-          qrencode -o iconmaker-QR.png -s 8 -m 3 -l M "$DL/iconmaker.cia"
-          gh release upload "$TAG" --clobber gpsp3d-QR.png iconmaker-QR.png
+          gh release upload "$TAG" --clobber gpsp3d-QR.png
 
-      - name: Add QR codes to the release notes
+      - name: Add the QR code to the release notes
         run: |
           # Drop a block from an earlier run, so re-runs replace it instead of stacking
           gh release view "$TAG" --json body -q .body > body.md
@@ -94,10 +93,11 @@ jobs:
             echo
             echo 'Open **FBI** -> **Remote Install** -> **Scan QR Code**, then scan:'
             echo
-            echo '| gpSP 3D | Icon Maker |'
-            echo '| :---: | :---: |'
-            echo "| <img src=\"$DL/gpsp3d-QR.png\" alt=\"QR code to install gpSP 3D $TAG with FBI\" width=\"220\"> | <img src=\"$DL/iconmaker-QR.png\" alt=\"QR code to install Icon Maker $TAG with FBI\" width=\"220\"> |"
-            echo "| [\`gpsp3d.cia\`]($DL/gpsp3d.cia) | [\`iconmaker.cia\`]($DL/iconmaker.cia) |"
+            echo "<img src=\"$DL/gpsp3d-QR.png\" alt=\"QR code to install gpSP 3D $TAG with FBI\" width=\"220\">"
+            echo
+            echo "[\`gpsp3d.cia\`]($DL/gpsp3d.cia)"
+            echo
+            echo 'Icon Maker (HOME Menu icons for your games) is released on its own: https://github.com/bheppe/iconmaker-3ds/releases/latest'
             echo '<!-- gpsp3d-qr:end -->'
           } >> notes.md
           gh release edit "$TAG" --notes-file notes.md
